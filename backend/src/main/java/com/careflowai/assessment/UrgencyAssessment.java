@@ -43,7 +43,7 @@ public class UrgencyAssessment {
 
     @ElementCollection
     @CollectionTable(name = "urgency_score_factors", joinColumns = @JoinColumn(name = "assessment_id"))
-    @Column(name = "factor", nullable = false)
+    @Column(name = "factor", nullable = false, columnDefinition = "text")
     private List<String> scoreFactors = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
@@ -53,12 +53,12 @@ public class UrgencyAssessment {
 
     @ElementCollection
     @CollectionTable(name = "urgency_red_flags", joinColumns = @JoinColumn(name = "assessment_id"))
-    @Column(name = "red_flag", nullable = false)
+    @Column(name = "red_flag", nullable = false, columnDefinition = "text")
     private List<String> redFlagIndicators = new ArrayList<>();
 
     @ElementCollection
     @CollectionTable(name = "urgency_missing_details", joinColumns = @JoinColumn(name = "assessment_id"))
-    @Column(name = "missing_detail", nullable = false)
+    @Column(name = "missing_detail", nullable = false, columnDefinition = "text")
     private List<String> missingOrAmbiguousDetails = new ArrayList<>();
 
     @Column(columnDefinition = "text")

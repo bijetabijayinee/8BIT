@@ -1,6 +1,7 @@
 package com.careflowai.agent;
 
 import com.careflowai.agent.dto.AgentDashboardResponse;
+import com.careflowai.agent.dto.AgentPerformanceResponse;
 import com.careflowai.agent.dto.PatientFlashcardResponse;
 import com.careflowai.agent.dto.ResolveFlashcardRequest;
 import java.util.UUID;
@@ -17,9 +18,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class PatientAgentController {
 
     private final PatientAgentService patientAgentService;
+    private final AgentPerformanceService agentPerformanceService;
 
-    public PatientAgentController(PatientAgentService patientAgentService) {
+    public PatientAgentController(PatientAgentService patientAgentService,
+                                  AgentPerformanceService agentPerformanceService) {
         this.patientAgentService = patientAgentService;
+        this.agentPerformanceService = agentPerformanceService;
+    }
+
+    @GetMapping("/performance")
+    public AgentPerformanceResponse performance() {
+        return agentPerformanceService.performance();
     }
 
     @GetMapping("/dashboard")

@@ -1,6 +1,7 @@
 import { Bot, Loader2, MessageCircle, Send } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { getHospitalChatMessages, sendHospitalChatMessage } from '../../api/client';
+import { FormattedMessage } from '../../components/FormattedMessage';
 import type { HospitalChatMessage, StaffUser } from '../../types/careflow';
 
 interface HospitalLiveChatProps {
@@ -51,7 +52,7 @@ export function HospitalLiveChat({ activeStaff }: HospitalLiveChatProps) {
   };
 
   return (
-    <section className="flex min-h-[28rem] min-w-0 flex-col rounded-lg border border-sky-100 bg-white shadow-sm">
+    <section className="flex h-[30rem] min-w-0 flex-col overflow-hidden rounded-lg border border-sky-100 bg-white shadow-sm">
       <header className="flex items-center justify-between gap-3 border-b border-sky-100 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-md bg-sky-700 text-white">
@@ -65,7 +66,7 @@ export function HospitalLiveChat({ activeStaff }: HospitalLiveChatProps) {
         {isSending ? <Loader2 size={17} className="animate-spin text-sky-700" aria-hidden="true" /> : null}
       </header>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="scrollbar-hide min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
         {messages.length === 0 ? (
           <p className="rounded-md bg-sky-50 p-3 text-sm text-slate-500">No hospital messages yet.</p>
@@ -84,7 +85,13 @@ export function HospitalLiveChat({ activeStaff }: HospitalLiveChatProps) {
                 </p>
                 <p className="text-xs text-slate-500">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
-              <p className="mt-2 whitespace-pre-wrap break-words leading-6">{message.body}</p>
+              <div className="mt-2">
+                {message.savi ? (
+                  <FormattedMessage text={message.body} />
+                ) : (
+                  <p className="whitespace-pre-wrap break-words leading-6">{message.body}</p>
+                )}
+              </div>
             </article>
           ))
         )}
@@ -95,12 +102,13 @@ export function HospitalLiveChat({ activeStaff }: HospitalLiveChatProps) {
           <input
             value={body}
             onChange={(event) => setBody(event.target.value)}
-            className="input-field mt-0"
-            placeholder="Message the hospital, or tag @savi"
+            disabled={isSending}
+            className="input-field mt-0 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60"
+            placeholder={isSending ? 'Savi is thinking...' : 'Message the hospital, or tag @savi'}
           />
           <button
             type="submit"
-            disabled={isSending}
+            disabled={isSending || !body.trim()}
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="Send hospital chat"
           >

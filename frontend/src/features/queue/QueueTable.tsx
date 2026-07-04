@@ -1,16 +1,13 @@
 import {
   Activity,
   AlertCircle,
-  ArrowDownAZ,
-  ArrowUpAZ,
   BadgeAlert,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   Clock3,
   FileText,
-  Filter,
-  GripVertical,
   Loader2,
   MapPin,
   Pill,
@@ -24,9 +21,12 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import type { PointerEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Avatar } from '../../components/Avatar';
+import { showToast } from '../../components/toast';
 import {
+  ApiError,
   assignQueueDoctor,
   createThreadComment,
   generatePatientReport,
@@ -42,17 +42,14 @@ import type {
   IntakeResponse,
   PatientReportResponse,
   QueueEntry,
-  QueueFilters,
-  QueueSortKey,
   QueueStatus,
-  SortDirection,
   StaffUser,
   ThreadComment,
   UrgencyCategory,
 } from '../../types/careflow';
 
 const urgencyStyles: Record<UrgencyCategory, string> = {
-  CRITICAL: 'bg-red-100 text-red-800 ring-red-200',
+  CRITICAL: 'bg-rose-100 text-rose-900 ring-rose-200',
   HIGH: 'bg-amber-100 text-amber-800 ring-amber-200',
   MEDIUM: 'bg-sky-100 text-sky-800 ring-sky-200',
   LOW: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
@@ -70,12 +67,12 @@ const urgencyBoardStyles: Record<
   }
 > = {
   CRITICAL: {
-    accent: 'bg-red-600',
-    bar: 'bg-red-500',
-    border: 'border-red-200',
-    glow: 'shadow-red-100',
-    soft: 'bg-red-50',
-    text: 'text-red-800',
+    accent: 'bg-rose-700',
+    bar: 'bg-rose-600',
+    border: 'border-rose-200',
+    glow: 'shadow-rose-100',
+    soft: 'bg-rose-50',
+    text: 'text-rose-900',
   },
   HIGH: {
     accent: 'bg-amber-500',
@@ -110,38 +107,6 @@ const urgencyOptions: Array<{ value: UrgencyCategory; label: string }> = [
   { value: 'LOW', label: 'Low' },
 ];
 
-const statusOptions: Array<{ value: QueueStatus; label: string }> = [
-  { value: 'WAITING', label: 'Waiting' },
-  { value: 'IN_TRIAGE', label: 'In triage' },
-  { value: 'IN_TREATMENT', label: 'In treatment' },
-  { value: 'DISCHARGED', label: 'Discharged' },
-  { value: 'LEFT_WITHOUT_BEING_SEEN', label: 'Left without being seen' },
-];
-
-const sortOptions: Array<{ value: QueueSortKey; label: string }> = [
-  { value: 'backend', label: 'Queue rule' },
-  { value: 'urgencyScore', label: 'Score' },
-  { value: 'waitingMinutes', label: 'Wait time' },
-  { value: 'patientDisplayId', label: 'Patient ID' },
-  { value: 'department', label: 'Department' },
-  { value: 'status', label: 'Status' },
-];
-
-const urgencyRank: Record<UrgencyCategory, number> = {
-  CRITICAL: 0,
-  HIGH: 1,
-  MEDIUM: 2,
-  LOW: 3,
-};
-
-const statusRank: Record<QueueStatus, number> = {
-  WAITING: 0,
-  IN_TRIAGE: 1,
-  IN_TREATMENT: 2,
-  DISCHARGED: 3,
-  LEFT_WITHOUT_BEING_SEEN: 4,
-};
-
 const statusStyles: Record<QueueStatus, string> = {
   WAITING: 'bg-amber-50 text-amber-800 ring-amber-200',
   IN_TRIAGE: 'bg-indigo-50 text-indigo-800 ring-indigo-200',
@@ -149,6 +114,14 @@ const statusStyles: Record<QueueStatus, string> = {
   DISCHARGED: 'bg-slate-100 text-slate-700 ring-slate-200',
   LEFT_WITHOUT_BEING_SEEN: 'bg-rose-50 text-rose-800 ring-rose-200',
 };
+
+function toastActionError(caughtError: unknown, fallback: string) {
+  if (caughtError instanceof ApiError && caughtError.status === 403) {
+    showToast('error', 'Action not allowed', caughtError.message);
+    return;
+  }
+  showToast('error', fallback, caughtError instanceof Error ? caughtError.message : undefined);
+}
 
 function formatUrgency(category: UrgencyCategory) {
   return category.charAt(0) + category.slice(1).toLowerCase();
@@ -179,50 +152,6 @@ function waitLabel(entry: QueueEntry) {
     return '30m+ target';
   }
   return null;
-}
-
-function compareText(first: string, second: string) {
-  return first.localeCompare(second, undefined, { sensitivity: 'base' });
-}
-
-function sortEntries(entries: QueueEntry[], sortKey: QueueSortKey, sortDirection: SortDirection) {
-  if (sortKey === 'backend') {
-    return entries;
-  }
-
-  const direction = sortDirection === 'asc' ? 1 : -1;
-  return [...entries].sort((first, second) => {
-    let result = 0;
-
-    if (sortKey === 'urgencyScore') {
-      result =
-        first.urgencyScore === second.urgencyScore
-          ? urgencyRank[first.urgencyCategory] - urgencyRank[second.urgencyCategory]
-          : first.urgencyScore - second.urgencyScore;
-    } else if (sortKey === 'waitingMinutes') {
-      result = first.waitingMinutes - second.waitingMinutes;
-    } else if (sortKey === 'patientDisplayId') {
-      result = compareText(first.patientDisplayId, second.patientDisplayId);
-    } else if (sortKey === 'department') {
-      result = compareText(first.department, second.department);
-    } else if (sortKey === 'status') {
-      result = statusRank[first.status] - statusRank[second.status];
-    }
-
-    if (result === 0) {
-      result = compareText(first.patientDisplayId, second.patientDisplayId);
-    }
-
-    return result * direction;
-  });
-}
-
-function entryMatchesFilters(entry: QueueEntry, filters: QueueFilters) {
-  return (
-    (!filters.category || entry.urgencyCategory === filters.category) &&
-    (!filters.status || entry.status === filters.status) &&
-    (!filters.department || entry.department.toLowerCase() === filters.department.toLowerCase())
-  );
 }
 
 function normalizeMatchText(value?: string | null) {
@@ -419,11 +348,8 @@ interface QueueTableProps {
 export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppointmentSaved, onStatusUpdated }: QueueTableProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([]);
   const [doctors, setDoctors] = useState<StaffUser[]>([]);
-  const [filters, setFilters] = useState<QueueFilters>({});
-  const [sortKey, setSortKey] = useState<QueueSortKey>('backend');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [doctorPanelOffset, setDoctorPanelOffset] = useState({ x: 0, y: 0 });
   const [doctorOverrides, setDoctorOverrides] = useState<Record<string, string>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<UrgencyCategory>>(new Set());
   const [updatingPatientId, setUpdatingPatientId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -468,23 +394,20 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
 
   const visibleEntries = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
-    const filteredEntries = entries.filter((entry) => entryMatchesFilters(entry, filters));
-    const searchedEntries =
-      normalizedSearch.length === 0
-        ? filteredEntries
-        : filteredEntries.filter((entry) =>
-            [
-              entry.patientDisplayId,
-              entry.chiefComplaint,
-              entry.department,
-              entry.status,
-              entry.urgencyCategory,
-              entry.assignedDoctor?.displayName ?? '',
-            ].some((value) => value.toLowerCase().includes(normalizedSearch)),
-          );
-
-    return sortEntries(searchedEntries, sortKey, sortDirection);
-  }, [entries, filters, searchQuery, sortDirection, sortKey]);
+    if (normalizedSearch.length === 0) {
+      return entries;
+    }
+    return entries.filter((entry) =>
+      [
+        entry.patientDisplayId,
+        entry.chiefComplaint,
+        entry.department,
+        entry.status,
+        entry.urgencyCategory,
+        entry.assignedDoctor?.displayName ?? '',
+      ].some((value) => value.toLowerCase().includes(normalizedSearch)),
+    );
+  }, [entries, searchQuery]);
 
   const waitingEntries = useMemo(
     () => entries.filter((entry) => entry.status === 'WAITING' || entry.status === 'IN_TRIAGE'),
@@ -512,33 +435,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
     void loadQueue();
   }, [loadQueue, refreshSignal]);
 
-  const updateFilter = <TKey extends keyof QueueFilters>(key: TKey, value: QueueFilters[TKey] | '') => {
-    setFilters((current) => {
-      const next = { ...current };
-      if (value === '') {
-        delete next[key];
-      } else {
-        next[key] = value;
-      }
-      return next;
-    });
-  };
-
-  const resetFilters = () => {
-    setFilters({});
-    setSortKey('backend');
-    setSortDirection('desc');
-  };
-
-  const handleSortKeyChange = (value: QueueSortKey) => {
-    setSortKey(value);
-    if (value === 'patientDisplayId' || value === 'department' || value === 'status') {
-      setSortDirection('asc');
-    } else {
-      setSortDirection('desc');
-    }
-  };
-
   const handleStatusChange = async (entry: QueueEntry, status: QueueStatus) => {
     if (entry.status === status) {
       return;
@@ -562,8 +458,9 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
         });
       }
       onStatusUpdated?.();
+      showToast('success', `${entry.patientDisplayId} moved to ${formatEnumLabel(status)}`);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to update queue status.');
+      toastActionError(caughtError, 'Unable to update queue status');
     } finally {
       setUpdatingPatientId(null);
     }
@@ -586,8 +483,9 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
       });
       setEntries((current) => current.map((item) => (item.patientId === updated.patientId ? updated : item)));
       onStatusUpdated?.();
+      showToast('success', `Doctor assigned to ${entry.patientDisplayId}`);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to assign doctor.');
+      toastActionError(caughtError, 'Unable to assign doctor');
     } finally {
       setUpdatingPatientId(null);
     }
@@ -622,8 +520,9 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
       });
       setEntries((current) => current.filter((item) => item.patientId !== entry.patientId));
       onStatusUpdated?.();
+      showToast('info', `${entry.patientDisplayId} removed from the queue`);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to remove patient from queue.');
+      toastActionError(caughtError, 'Unable to remove patient from queue');
     } finally {
       setUpdatingPatientId(null);
     }
@@ -641,28 +540,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
     } finally {
       setIsDetailLoading(false);
     }
-  };
-
-  const handleDoctorPanelDrag = (event: PointerEvent<HTMLButtonElement>) => {
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startOffset = doctorPanelOffset;
-    event.currentTarget.setPointerCapture(event.pointerId);
-
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      setDoctorPanelOffset({
-        x: Math.min(80, Math.max(-80, startOffset.x + moveEvent.clientX - startX)),
-        y: Math.min(120, Math.max(-120, startOffset.y + moveEvent.clientY - startY)),
-      });
-    };
-
-    const handleUp = () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-    };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
   };
 
   return (
@@ -686,88 +563,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 rounded-lg border border-sky-100 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
-        <label className="text-sm font-medium text-slate-700">
-          <span className="inline-flex items-center gap-1.5">
-            <Filter size={15} aria-hidden="true" />
-            Urgency
-          </span>
-          <select
-            value={filters.category ?? ''}
-            onChange={(event) => updateFilter('category', event.target.value as UrgencyCategory | '')}
-            className="input-field"
-          >
-            <option value="">All urgency</option>
-            {urgencyOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Status
-          <select
-            value={filters.status ?? ''}
-            onChange={(event) => updateFilter('status', event.target.value as QueueStatus | '')}
-            className="input-field"
-          >
-            <option value="">All statuses</option>
-            {statusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Department
-          <input
-            value={filters.department ?? ''}
-            onChange={(event) => updateFilter('department', event.target.value)}
-            className="input-field"
-            placeholder="Emergency"
-          />
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Sort
-          <select
-            value={sortKey}
-            onChange={(event) => handleSortKeyChange(event.target.value as QueueSortKey)}
-            className="input-field"
-          >
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="flex items-end gap-2">
-          <button
-            type="button"
-            onClick={() => setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))}
-            disabled={sortKey === 'backend'}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-sky-200 bg-white text-slate-800 shadow-sm transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
-            title="Toggle sort direction"
-          >
-            {sortDirection === 'asc' ? <ArrowUpAZ size={16} aria-hidden="true" /> : <ArrowDownAZ size={16} aria-hidden="true" />}
-          </button>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-sky-200 bg-white text-slate-800 shadow-sm transition hover:bg-sky-50"
-            title="Reset filters"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-
       {error ? (
         <div className="mt-5 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -778,7 +573,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
       <QueueCommandCenter
         currentPatient={currentPatient}
         doctors={doctors}
-        doctorPanelOffset={doctorPanelOffset}
         doctorOverrides={doctorOverrides}
         engagedEntries={engagedEntries}
         overdueEntries={overdueEntries}
@@ -791,7 +585,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
             void handleAssignDoctor(entry, doctorId);
           }
         }}
-        onDoctorPanelDrag={handleDoctorPanelDrag}
         onOpenEntry={openIntakeDetail}
         onStatusChange={handleStatusChange}
       />
@@ -809,42 +602,69 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            {groupedEntries.map((group) => (
-              <section key={group.value} className={`min-w-0 rounded-lg border ${urgencyBoardStyles[group.value].border} ${urgencyBoardStyles[group.value].soft} p-3`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`h-3 w-3 rounded-full ${urgencyBoardStyles[group.value].accent}`} />
-                    <h3 className={`text-sm font-semibold ${urgencyBoardStyles[group.value].text}`}>
-                      {group.label}
-                    </h3>
-                  </div>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                    {group.entries.length}
-                  </span>
-                </div>
-
-                <div className="mt-3 space-y-3">
-                  {group.entries.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-slate-200 bg-white/70 px-3 py-8 text-center text-sm text-slate-500">
-                      No {group.label.toLowerCase()} cases
-                    </div>
-                  ) : (
-                    group.entries.map((entry) => (
-                      <PatientTriageCard
-                        key={entry.patientId}
-                        entry={entry}
-                        updatingPatientId={updatingPatientId}
-                        doctors={doctors}
-                        onAssignDoctor={handleAssignDoctor}
-                        onOpenEntry={openIntakeDetail}
-                        onRemoveFromQueue={handleRemoveFromQueue}
-                        onStatusChange={handleStatusChange}
+            {groupedEntries.map((group) => {
+              const isCollapsed = collapsedGroups.has(group.value);
+              return (
+                <section key={group.value} className={`min-w-0 self-start rounded-lg border ${urgencyBoardStyles[group.value].border} ${urgencyBoardStyles[group.value].soft} p-3`}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsedGroups((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.value)) {
+                          next.delete(group.value);
+                        } else {
+                          next.add(group.value);
+                        }
+                        return next;
+                      })
+                    }
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-0.5 transition hover:bg-white/60"
+                    aria-expanded={!isCollapsed}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className={`h-3 w-3 rounded-full ${urgencyBoardStyles[group.value].accent}`} />
+                      <span className={`text-sm font-semibold ${urgencyBoardStyles[group.value].text}`}>
+                        {group.label}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                        {group.entries.length}
+                      </span>
+                      <ChevronDown
+                        size={15}
+                        aria-hidden="true"
+                        className={`text-slate-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
                       />
-                    ))
-                  )}
-                </div>
-              </section>
-            ))}
+                    </span>
+                  </button>
+
+                  {!isCollapsed ? (
+                    <div className="scrollbar-hide mt-3 max-h-[42rem] space-y-3 overflow-y-auto">
+                      {group.entries.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-slate-200 bg-white/70 px-3 py-8 text-center text-sm text-slate-500">
+                          No {group.label.toLowerCase()} cases
+                        </div>
+                      ) : (
+                        group.entries.map((entry) => (
+                          <PatientTriageCard
+                            key={entry.patientId}
+                            entry={entry}
+                            updatingPatientId={updatingPatientId}
+                            doctors={doctors}
+                            onAssignDoctor={handleAssignDoctor}
+                            onOpenEntry={openIntakeDetail}
+                            onRemoveFromQueue={handleRemoveFromQueue}
+                            onStatusChange={handleStatusChange}
+                          />
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
           </div>
         )}
       </div>
@@ -873,7 +693,6 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
 interface QueueCommandCenterProps {
   currentPatient: QueueEntry | null;
   doctors: StaffUser[];
-  doctorPanelOffset: { x: number; y: number };
   doctorOverrides: Record<string, string>;
   engagedEntries: QueueEntry[];
   overdueEntries: QueueEntry[];
@@ -881,7 +700,6 @@ interface QueueCommandCenterProps {
   updatingPatientId: string | null;
   waitingCount: number;
   onDoctorOverrideChange: (patientId: string, doctorId: string) => void;
-  onDoctorPanelDrag: (event: PointerEvent<HTMLButtonElement>) => void;
   onOpenEntry: (entry: QueueEntry) => void;
   onStatusChange: (entry: QueueEntry, status: QueueStatus) => Promise<void>;
 }
@@ -889,7 +707,6 @@ interface QueueCommandCenterProps {
 function QueueCommandCenter({
   currentPatient,
   doctors,
-  doctorPanelOffset,
   doctorOverrides,
   engagedEntries,
   overdueEntries,
@@ -897,7 +714,6 @@ function QueueCommandCenter({
   updatingPatientId,
   waitingCount,
   onDoctorOverrideChange,
-  onDoctorPanelDrag,
   onOpenEntry,
   onStatusChange,
 }: QueueCommandCenterProps) {
@@ -973,69 +789,56 @@ function QueueCommandCenter({
         </div>
 
         {overdueEntries.length > 0 ? (
-          <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 sm:p-4">
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] xl:items-start">
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-600 text-white">
-                  <BadgeAlert size={19} aria-hidden="true" />
-                </span>
-                <div>
-                  <h3 className="text-sm font-semibold text-red-900">Waiting time alert</h3>
-                  <p className="mt-1 text-sm text-red-800">
-                    {overdueEntries.length} patient{overdueEntries.length === 1 ? '' : 's'} past target on the home queue.
-                  </p>
-                </div>
+          <div className="mt-4 min-w-0 rounded-md border border-rose-200 bg-rose-50 p-3 sm:p-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-rose-700 text-white">
+                <BadgeAlert size={19} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-rose-900">Waiting time alert</h3>
+                <p className="mt-1 text-sm text-rose-800">
+                  {overdueEntries.length} patient{overdueEntries.length === 1 ? '' : 's'} past target on the home queue.
+                </p>
               </div>
-              <div className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-4">
-                {overdueEntries.slice(0, 4).map((entry) => (
-                  <div key={entry.patientId} className="min-w-0 rounded-md bg-white p-3 shadow-sm ring-1 ring-inset ring-red-100">
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onOpenEntry(entry)}
-                        className="min-w-0 truncate text-left text-sm font-semibold text-slate-950 hover:text-red-700"
-                      >
-                        {entry.patientDisplayId}
-                      </button>
-                      <span className="text-xs font-semibold text-red-700">{formatWaitingTime(entry.waitingMinutes)}</span>
-                    </div>
-                    <p className="mt-1 truncate text-xs text-slate-500">{entry.chiefComplaint}</p>
+            </div>
+            <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {overdueEntries.slice(0, 6).map((entry) => (
+                <div key={entry.patientId} className="min-w-0 rounded-md bg-white p-3 shadow-sm ring-1 ring-inset ring-rose-100">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Avatar name={entry.patientDisplayId} kind="patient" size="sm" />
+                    <button
+                      type="button"
+                      onClick={() => onOpenEntry(entry)}
+                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-slate-950 hover:text-rose-700"
+                    >
+                      {entry.patientDisplayId}
+                    </button>
+                    <span className="shrink-0 text-xs font-semibold text-rose-700">{formatWaitingTime(entry.waitingMinutes)}</span>
                   </div>
-                ))}
-              </div>
+                  <p className="mt-1.5 break-words text-xs leading-4 text-slate-500">{entry.chiefComplaint}</p>
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
       </section>
 
-      <section
-        className="rounded-lg border border-emerald-200 bg-white p-4 shadow-sm transition-transform"
-        style={{ transform: `translate(${doctorPanelOffset.x}px, ${doctorPanelOffset.y}px)` }}
-      >
+      <section className="flex max-h-[38rem] min-w-0 flex-col overflow-hidden rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-emerald-600 text-white">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white">
               <Stethoscope size={19} aria-hidden="true" />
             </span>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-sm font-semibold text-slate-950">Engaged doctors</h3>
-              <p className="text-xs text-slate-500">
+              <p className="truncate text-xs text-slate-500">
                 {doctorAssignments.assigned.length} assigned, {doctorAssignments.queued.length} queued
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onPointerDown={onDoctorPanelDrag}
-            className="flex h-9 w-9 cursor-grab items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 active:cursor-grabbing"
-            aria-label="Move engaged doctors panel"
-            title="Move engaged doctors panel"
-          >
-            <GripVertical size={16} aria-hidden="true" />
-          </button>
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {engagedEntries.length === 0 ? (
             <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">
               No doctors engaged right now.
@@ -1116,13 +919,16 @@ function DoctorAssignmentCard({
   return (
     <article className={`rounded-md border p-3 ${isAssigned ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-white'}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-950">
-            {assignment.doctor?.displayName ?? 'Awaiting specialist'}
-          </p>
-          <p className="mt-1 truncate text-xs text-slate-500">
-            {assignment.doctor?.specialty ?? assignment.requiredSpecialty}
-          </p>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Avatar name={assignment.doctor?.displayName ?? 'Awaiting specialist'} kind="doctor" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-950">
+              {assignment.doctor?.displayName ?? 'Awaiting specialist'}
+            </p>
+            <p className="mt-1 truncate text-xs text-slate-500">
+              {assignment.doctor?.specialty ?? assignment.requiredSpecialty}
+            </p>
+          </div>
         </div>
         <span
           className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ring-1 ring-inset ${
@@ -1219,12 +1025,15 @@ function PatientTriageCard({
       className={`cursor-pointer rounded-lg border ${tone.border} bg-white p-3 shadow-sm ${tone.glow} transition hover:-translate-y-0.5 hover:shadow-md`}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {entry.staffEscalated ? <ShieldAlert size={15} className="shrink-0 text-red-600" aria-label="Staff escalated" /> : null}
-            <h4 className="truncate text-sm font-semibold text-slate-950">{entry.patientDisplayId}</h4>
+        <div className="flex min-w-0 items-start gap-2.5">
+          <Avatar name={entry.patientDisplayId} kind="patient" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {entry.staffEscalated ? <ShieldAlert size={15} className="shrink-0 text-rose-700" aria-label="Staff escalated" /> : null}
+              <h4 className="truncate text-sm font-semibold text-slate-950">{entry.patientDisplayId}</h4>
+            </div>
+            <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{entry.chiefComplaint}</p>
           </div>
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{entry.chiefComplaint}</p>
         </div>
         <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ring-1 ring-inset ${urgencyStyles[entry.urgencyCategory]}`}>
           {entry.urgencyScore}

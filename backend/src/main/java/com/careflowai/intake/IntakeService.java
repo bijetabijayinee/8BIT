@@ -1,6 +1,8 @@
 package com.careflowai.intake;
 
+import com.careflowai.agent.MedicalResearchAgent;
 import com.careflowai.agent.PatientAgentService;
+import com.careflowai.agent.WorkflowStreamService;
 import com.careflowai.ai.AiAssessmentOutput;
 import com.careflowai.ai.AiAssessmentService;
 import com.careflowai.assessment.UrgencyAssessment;
@@ -38,6 +40,8 @@ public class IntakeService {
     private final StaffUserService staffUserService;
     private final IntakeMapper intakeMapper;
     private final SimpleIntakeVectorStore vectorStore;
+    private final WorkflowStreamService workflowStream;
+    private final MedicalResearchAgent medicalResearchAgent;
 
     public IntakeService(PatientRepository patientRepository,
                          IntakeRepository intakeRepository,
@@ -47,7 +51,9 @@ public class IntakeService {
                          PatientAgentService patientAgentService,
                          StaffUserService staffUserService,
                          IntakeMapper intakeMapper,
-                         SimpleIntakeVectorStore vectorStore) {
+                         SimpleIntakeVectorStore vectorStore,
+                         WorkflowStreamService workflowStream,
+                         MedicalResearchAgent medicalResearchAgent) {
         this.patientRepository = patientRepository;
         this.intakeRepository = intakeRepository;
         this.assessmentRepository = assessmentRepository;
@@ -57,6 +63,8 @@ public class IntakeService {
         this.staffUserService = staffUserService;
         this.intakeMapper = intakeMapper;
         this.vectorStore = vectorStore;
+        this.workflowStream = workflowStream;
+        this.medicalResearchAgent = medicalResearchAgent;
     }
 
     @Transactional
@@ -66,13 +74,36 @@ public class IntakeService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Patient display ID already exists.");
         });
 
+        workflowStream.publish(patientDisplayId, "INTAKE_RECEIVED", "Intake workspace", "Intake received",
+            "Registering arrival for %s: %s.".formatted(patientDisplayId, request.chiefComplaint()));
+
         StaffUser actor = staffUserService.resolveActor(request.staffName(), null, request.department());
         Patient patient = patientRepository.save(new Patient(patientDisplayId, request.ageBand()));
         Intake intake = intakeRepository.save(toIntake(patient, request, actor));
+        workflowStream.publish(patientDisplayId, "INTAKE_SAVED", "Intake workspace", "Saved to database",
+            "Patient record and intake stored in Postgres (department %s).".formatted(intake.getDepartment()));
+
         UrgencyAssessment assessment = createAssessment(patient, intake);
+
+        // The Medical Research Agent runs before queue sorting and assignment so its
+        // findings feed the later stages (and never break the intake if it fails).
+        String researchBriefing = medicalResearchAgent
+            .research(patient, intake, assessment.getSuggestedDiagnosis())
+            .map(MedicalResearchAgent.ResearchOutcome::briefing)
+            .orElse(null);
+
         QueueEntry queueEntry = queueService.upsertFromAssessment(patient, intake, assessment);
-        patientAgentService.handleIntakeIngested(patient, intake, assessment, queueEntry, actor);
+        workflowStream.publish(patientDisplayId, "QUEUE_SORTED", "Priority Agent", "Patient sorted into queue",
+            "Placed as %s with urgency score %d in %s.".formatted(
+                queueEntry.getUrgencyCategory(), queueEntry.getUrgencyScore(), queueEntry.getDepartment()),
+            queueSortReasoning(assessment, queueEntry));
+
+        patientAgentService.handleIntakeIngested(patient, intake, assessment, queueEntry, actor, researchBriefing);
         vectorStore.indexQueueEntry(queueEntry, assessment, assignmentSummary(patient));
+        workflowStream.publish(patientDisplayId, "CONTEXT_INDEXED", "Savi memory", "Context indexed",
+            "Intake, triage, and research context embedded into Savi's semantic memory.");
+        workflowStream.publish(patientDisplayId, "WORKFLOW_COMPLETE", "All agents", "Workflow complete",
+            "All agents finished for %s.".formatted(patientDisplayId), null);
         return IntakeResponse.from(intake, UrgencyAssessmentResponse.from(assessment));
     }
 
@@ -147,11 +178,21 @@ public class IntakeService {
     }
 
     private UrgencyAssessment createAssessment(Patient patient, Intake intake) {
+        workflowStream.publish(patient.getDisplayId(), "LLM_REQUESTED", "Savi LLM triage", "LLM triage called",
+            "Sending intake to the LLM for urgency, diagnosis, and attention notes.");
         AiAssessmentOutput advisory = aiAssessmentService.assess(intake);
         if (advisory.suggestedCategory() == null || advisory.suggestedScore() == null) {
+            workflowStream.publish(patient.getDisplayId(), "LLM_RESPONDED", "Savi LLM triage", "LLM triage failed",
+                "The LLM response did not include a usable urgency category and score.");
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                 "LLM triage response did not include a usable urgency category and score.");
         }
+        workflowStream.publish(patient.getDisplayId(), "LLM_RESPONDED", "Savi LLM triage", "LLM response received",
+            "Suggested %s (%d): %s".formatted(
+                advisory.suggestedCategory(),
+                advisory.suggestedScore(),
+                advisory.suggestedDiagnosis() == null ? "no diagnosis text" : advisory.suggestedDiagnosis()),
+            llmReasoning(advisory));
         int finalScore = Math.max(0, Math.min(100, advisory.suggestedScore()));
         UrgencyAssessment assessment = new UrgencyAssessment(patient, intake, advisory.suggestedCategory(), finalScore);
         assessment.replaceScoreFactors(scoreFactors(advisory));
@@ -167,6 +208,46 @@ public class IntakeService {
             advisory.confidenceLevel()
         );
         return assessmentRepository.save(assessment);
+    }
+
+    private String llmReasoning(AiAssessmentOutput advisory) {
+        StringBuilder reasoning = new StringBuilder();
+        reasoning.append("The triage LLM read the chief complaint, structured symptoms, vitals, distress score, and risk flags, then reasoned about how dangerous the presentation is.\n\n");
+        if (advisory.structuredSymptomSummary() != null && !advisory.structuredSymptomSummary().isBlank()) {
+            reasoning.append("What it understood: ").append(advisory.structuredSymptomSummary()).append("\n\n");
+        }
+        reasoning.append("Chosen urgency: ").append(advisory.suggestedCategory())
+            .append(" with severity score ").append(advisory.suggestedScore()).append("/100.\n");
+        if (advisory.suggestedDiagnosis() != null && !advisory.suggestedDiagnosis().isBlank()) {
+            reasoning.append("Likely concern / differential: ").append(advisory.suggestedDiagnosis()).append("\n");
+        }
+        if (advisory.redFlagIndicators() != null && !advisory.redFlagIndicators().isEmpty()) {
+            reasoning.append("Red flags that pushed the score up: ").append(String.join(", ", advisory.redFlagIndicators())).append("\n");
+        }
+        if (advisory.missingOrAmbiguousDetails() != null && !advisory.missingOrAmbiguousDetails().isEmpty()) {
+            reasoning.append("Uncertainty / missing details it flagged: ").append(String.join(", ", advisory.missingOrAmbiguousDetails())).append("\n");
+        }
+        if (advisory.staffFacingExplanation() != null && !advisory.staffFacingExplanation().isBlank()) {
+            reasoning.append("\nExplanation for staff: ").append(advisory.staffFacingExplanation()).append("\n");
+        }
+        reasoning.append("\nConfidence in this assessment: ").append(advisory.confidenceLevel()).append(".");
+        return reasoning.toString();
+    }
+
+    private String queueSortReasoning(UrgencyAssessment assessment, QueueEntry queueEntry) {
+        return ("""
+            The Priority Agent took the LLM's urgency of %s (score %d) and placed the patient in the live queue for %s.
+
+            Queue ordering rule it applied: patients are ranked first by urgency category (Critical > High > Medium > Low), then staff escalations, then by how long they have been waiting (patients near 30 minutes and past 40 minutes are pushed up), and finally by severity score.
+
+            Because this patient is %s, they enter the %s band and will be re-ranked automatically as their wait grows.""")
+            .formatted(
+                assessment.getFinalCategory(),
+                assessment.getFinalScore(),
+                queueEntry.getDepartment(),
+                assessment.getFinalCategory(),
+                assessment.getFinalCategory()
+            );
     }
 
     private List<String> scoreFactors(AiAssessmentOutput advisory) {

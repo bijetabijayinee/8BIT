@@ -11,6 +11,7 @@ import com.careflowai.agent.dto.PatientFlashcardResponse;
 import com.careflowai.agent.dto.PatientTimelineEventResponse;
 import com.careflowai.agent.dto.ResolveFlashcardRequest;
 import com.careflowai.intake.Intake;
+import com.careflowai.notification.NotificationService;
 import com.careflowai.patient.Patient;
 import com.careflowai.queue.QueueEntry;
 import com.careflowai.staff.StaffUser;
@@ -40,6 +41,8 @@ public class PatientAgentService {
     private final StaffUserService staffUserService;
     private final SystemAgentService systemAgentService;
     private final AiDoctorAssignmentService aiDoctorAssignmentService;
+    private final WorkflowStreamService workflowStream;
+    private final NotificationService notificationService;
 
     public PatientAgentService(CareTeamAssignmentRepository assignmentRepository,
                                PatientFlashcardRepository flashcardRepository,
@@ -47,7 +50,9 @@ public class PatientAgentService {
                                StaffUserRepository staffUserRepository,
                                StaffUserService staffUserService,
                                SystemAgentService systemAgentService,
-                               AiDoctorAssignmentService aiDoctorAssignmentService) {
+                               AiDoctorAssignmentService aiDoctorAssignmentService,
+                               WorkflowStreamService workflowStream,
+                               NotificationService notificationService) {
         this.assignmentRepository = assignmentRepository;
         this.flashcardRepository = flashcardRepository;
         this.timelineRepository = timelineRepository;
@@ -55,13 +60,15 @@ public class PatientAgentService {
         this.staffUserService = staffUserService;
         this.systemAgentService = systemAgentService;
         this.aiDoctorAssignmentService = aiDoctorAssignmentService;
+        this.workflowStream = workflowStream;
+        this.notificationService = notificationService;
     }
 
     @Transactional
     public void handleIntakeIngested(Patient patient, Intake intake, UrgencyAssessment assessment, QueueEntry queueEntry,
-                                     StaffUser intakeActor) {
+                                     StaffUser intakeActor, String researchBriefing) {
         AssignmentDecision assignmentDecision = systemAgentService.isActive("ASSIGNMENT_AGENT")
-            ? resolveAssignedDoctor(intake, assessment, intakeActor)
+            ? resolveAssignedDoctor(intake, assessment, intakeActor, researchBriefing)
             : new AssignmentDecision(intakeActor, "Assignment Agent inactive; intake actor retained.");
         CareTeamAssignment assignment = assignmentRepository.save(new CareTeamAssignment(
             patient,
@@ -80,10 +87,18 @@ public class PatientAgentService {
                     assessment.getFinalScore()
                 ), "AGENT");
         }
+        StaffUser assignedDoctor = assignmentDecision.doctor();
+        workflowStream.publish(patient.getDisplayId(), "DOCTOR_ASSIGNED", "Assignment Agent", "Doctor assigned",
+            "%s assigned to %s. %s".formatted(
+                assignedDoctor.getDisplayName(),
+                patient.getDisplayId(),
+                assignmentDecision.reason()
+            ),
+            assignmentReasoning(assignedDoctor, assessment, intake, assignmentDecision.reason(), researchBriefing));
         if (systemAgentService.isActive("NOTIFICATION_AGENT")) {
-            appendEvent(patient, intake, assignmentDecision.doctor(), "DOCTOR_ASSIGNED", "Doctor assigned",
+            appendEvent(patient, intake, assignedDoctor, "DOCTOR_ASSIGNED", "Doctor assigned",
                 "Notification Agent assigned %s to %s. %s".formatted(
-                    assignmentDecision.doctor().getDisplayName(),
+                    assignedDoctor.getDisplayName(),
                     patient.getDisplayId(),
                     assignmentDecision.reason()
                 ), "AGENT");
@@ -93,7 +108,104 @@ public class PatientAgentService {
         if (systemAgentService.isActive("NOTIFICATION_AGENT")) {
             appendEvent(patient, intake, null, "FLASHCARDS_CREATED", "Flashcards created",
                 "Agent published care-team flashcards for the assigned doctor and intake team.", "AGENT");
+            dispatchIntakeNotifications(patient, intake, queueEntry, assignedDoctor, intakeActor, assignmentDecision.reason());
+            workflowStream.publish(patient.getDisplayId(), "DOCTOR_NOTIFIED", "Notification Agent", "Care team notified",
+                "Notified %s, the %s intake desk, and triage nurses.".formatted(
+                    assignedDoctor.getDisplayName(),
+                    intake.getDepartment()
+                ),
+                notificationReasoning(assignedDoctor, queueEntry, intake));
+        } else {
+            workflowStream.publish(patient.getDisplayId(), "DOCTOR_NOTIFIED", "Notification Agent", "Notification skipped",
+                "Notification Agent is inactive; no care-team notifications were published.",
+                "The Notification Agent is turned off in the System Agents panel, so no in-app notifications were sent for this patient.");
         }
+    }
+
+    private void dispatchIntakeNotifications(Patient patient, Intake intake, QueueEntry queueEntry,
+                                             StaffUser assignedDoctor, StaffUser intakeActor, String assignmentReason) {
+        String urgencyLine = "%s (score %d) in %s".formatted(
+            queueEntry.getUrgencyCategory(), queueEntry.getUrgencyScore(), intake.getDepartment());
+
+        // Assigned doctor: a personal, patient-scoped alert.
+        notificationService.notifyStaff(
+            StaffRole.DOCTOR,
+            assignedDoctor.getId(),
+            patient.getId(),
+            patient.getDisplayId(),
+            "Notification Agent",
+            "ASSIGNMENT",
+            "New patient assigned: " + patient.getDisplayId(),
+            "You have been assigned %s - %s. Complaint: %s. %s".formatted(
+                patient.getDisplayId(), urgencyLine, intake.getChiefComplaint(), assignmentReason)
+        );
+
+        // Intake desk for this department.
+        notificationService.notifyStaff(
+            StaffRole.INTAKE_STAFF,
+            null,
+            patient.getId(),
+            patient.getDisplayId(),
+            "Notification Agent",
+            "INTAKE",
+            "%s routed to %s".formatted(patient.getDisplayId(), assignedDoctor.getDisplayName()),
+            "Agents sorted %s as %s and assigned %s. No further intake action needed unless details change.".formatted(
+                patient.getDisplayId(), urgencyLine, assignedDoctor.getDisplayName())
+        );
+
+        // Triage nurses see every new arrival and its urgency.
+        notificationService.notifyStaff(
+            StaffRole.TRIAGE_NURSE,
+            null,
+            patient.getId(),
+            patient.getDisplayId(),
+            "Notification Agent",
+            "TRIAGE",
+            "New arrival: %s - %s".formatted(patient.getDisplayId(), queueEntry.getUrgencyCategory()),
+            "%s arrived and was triaged to %s. Watch the queue for wait-time escalation.".formatted(
+                patient.getDisplayId(), urgencyLine)
+        );
+    }
+
+    private String assignmentReasoning(StaffUser doctor, UrgencyAssessment assessment, Intake intake, String reason,
+                                       String researchBriefing) {
+        String specialty = StringUtils.hasText(doctor.getSpecialty()) ? doctor.getSpecialty() : "general coverage";
+        String researchLine = StringUtils.hasText(researchBriefing)
+            ? "- It also read the Medical Research Agent's briefing on the condition before choosing.\n"
+            : "";
+        return ("""
+            The Assignment Agent compared the patient's needs against the active doctor roster.
+
+            - Patient needs: %s urgency, complaint "%s", department %s
+            - Weighed: specialty fit, department match, urgency, symptoms, risk flags, vitals
+            %s
+            Decision: %s (%s).
+            Why: %s""")
+            .formatted(
+                assessment.getFinalCategory(),
+                intake.getChiefComplaint(),
+                intake.getDepartment(),
+                researchLine,
+                doctor.getDisplayName(),
+                specialty,
+                reason
+            );
+    }
+
+    private String notificationReasoning(StaffUser doctor, QueueEntry queueEntry, Intake intake) {
+        return ("""
+            The Notification Agent decided who needs to know about this patient and sent targeted in-app alerts:
+
+            - %s (assigned doctor): a personal alert to start reviewing the case.
+            - %s intake desk: confirmation that agents finished routing.
+            - Triage nurses: a new-arrival alert with the %s urgency so they can watch wait times.
+
+            Each recipient sees only what is relevant to their role on their home page.""")
+            .formatted(
+                doctor.getDisplayName(),
+                intake.getDepartment(),
+                queueEntry.getUrgencyCategory()
+            );
     }
 
     @Transactional
@@ -256,8 +368,13 @@ public class PatientAgentService {
     }
 
     private AssignmentDecision resolveAssignedDoctor(Intake intake, UrgencyAssessment assessment, StaffUser fallbackActor) {
+        return resolveAssignedDoctor(intake, assessment, fallbackActor, null);
+    }
+
+    private AssignmentDecision resolveAssignedDoctor(Intake intake, UrgencyAssessment assessment, StaffUser fallbackActor,
+                                                     String researchBriefing) {
         List<StaffUser> activeDoctors = staffUserRepository.findByRoleAndActiveTrueOrderByCreatedAtAsc(StaffRole.DOCTOR);
-        return aiDoctorAssignmentService.recommend(intake, assessment, activeDoctors)
+        return aiDoctorAssignmentService.recommend(intake, assessment, activeDoctors, researchBriefing)
             .flatMap(recommendation -> activeDoctors.stream()
                 .filter(doctor -> doctor.getStaffCode().equalsIgnoreCase(recommendation.staffCode()))
                 .findFirst()

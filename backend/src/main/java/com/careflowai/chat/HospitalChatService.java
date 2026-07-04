@@ -41,7 +41,8 @@ public class HospitalChatService {
             String reply = aiChatService.chat(new AiChatRequest(
                 saviPrompt.isBlank() ? request.body() : saviPrompt,
                 request.authorName(),
-                request.authorRole()
+                request.authorRole(),
+                null
             )).message();
             append(new HospitalChatMessageResponse(
                 UUID.randomUUID().toString(),

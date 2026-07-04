@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getQueueMetrics } from '../../api/client';
 import type { QueueMetrics, UrgencyCategory } from '../../types/careflow';
+import { AgentPerformanceSection } from '../agent/AgentPerformanceSection';
 
 const urgencyLabels: Record<UrgencyCategory, string> = {
   CRITICAL: 'Critical',
@@ -133,6 +134,8 @@ export function MetricsDashboard({ refreshSignal = 0 }: { refreshSignal?: number
           </ResponsiveContainer>
         </ChartPanel>
       </div>
+
+      <AgentPerformanceSection refreshSignal={refreshSignal} />
     </section>
   );
 }

@@ -34,4 +34,17 @@ public class SpringAiChatService {
             .call()
             .content();
     }
+
+    private static final String DRAFT_NOTES_INSTRUCTION = """
+        You draft objective clinical symptom notes for a hospital intake form.
+        From the structured intake fields provided (complaint, symptoms, distress, vitals,
+        risk flags, age band), write 2-4 plain sentences a triage nurse would record.
+        Objective observations only - no diagnosis, no treatment, no speculation.
+        Return only the note text, no labels or quotes.
+        """;
+
+    public String draftSymptomNotes(String intakeFieldsJson) {
+        String notes = respond(DRAFT_NOTES_INSTRUCTION, intakeFieldsJson);
+        return notes == null ? "" : notes.trim();
+    }
 }

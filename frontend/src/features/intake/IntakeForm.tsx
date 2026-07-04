@@ -1,6 +1,7 @@
-import { Activity, AlertCircle, BrainCircuit, ClipboardPlus, Loader2, RotateCcw, Save, Stethoscope } from 'lucide-react';
+import { Activity, AlertCircle, ClipboardPlus, Loader2, RotateCcw, Save, Sparkles, Stethoscope } from 'lucide-react';
 import { type ChangeEvent, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
-import { createIntake, getNextPatientDisplayId } from '../../api/client';
+import { createIntake, draftSymptomNotes, getNextPatientDisplayId } from '../../api/client';
+import { AgentWorkflowPanel } from './AgentWorkflowPanel';
 import type {
   AgeBand,
   ArrivalMode,
@@ -136,6 +137,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdIntake, setCreatedIntake] = useState<IntakeResponse | null>(null);
+  const [workflowPatientId, setWorkflowPatientId] = useState<string | null>(null);
+  const [isDraftingNotes, setIsDraftingNotes] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
 
   const structuredSymptoms = useMemo(
     () =>
@@ -198,6 +202,7 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
     setError(null);
     setSuccessMessage(null);
     setCreatedIntake(null);
+    setWorkflowPatientId(null);
   };
 
   const buildRequest = (): CreateIntakeRequest => ({
@@ -221,10 +226,12 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
     setIsSubmitting(true);
     setError(null);
     setSuccessMessage(null);
+    setWorkflowPatientId(patientDisplayId.startsWith('Generating') ? null : patientDisplayId);
 
     try {
       const created = await createIntake(buildRequest());
       setCreatedIntake(created);
+      setWorkflowPatientId(created.patientDisplayId);
       setSuccessMessage(
         `${created.patientDisplayId} added to the queue with LLM urgency ${created.assessment?.finalCategory ?? 'pending'}.`,
       );
@@ -233,6 +240,7 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
       onCreated?.();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to create intake.');
+      setWorkflowPatientId(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -243,10 +251,38 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
       updateField(key, event.target.value as never);
     };
 
+  const generateSymptomNotes = async () => {
+    setIsDraftingNotes(true);
+    setNotesError(null);
+    try {
+      const notes = await draftSymptomNotes({
+        chiefComplaint: form.chiefComplaint.trim(),
+        structuredSymptoms,
+        clinicalDistressScore: form.distressScore,
+        vitals: form.vitals,
+        riskFlags: form.riskFlags,
+        ageBand: form.ageBand,
+        arrivalMode: form.arrivalMode,
+        department: form.department,
+      });
+      updateField('symptomNotes', notes);
+    } catch (caughtError) {
+      setNotesError(caughtError instanceof Error ? caughtError.message : 'Could not draft notes right now.');
+    } finally {
+      setIsDraftingNotes(false);
+    }
+  };
+
   return (
     <section aria-labelledby="intake-title" className="py-6">
       <form onSubmit={handleSubmit} className="relative border-b border-sky-100 pb-6">
-        {isSubmitting ? <DiagnosisLoadingOverlay patientDisplayId={patientDisplayId} /> : null}
+        {workflowPatientId ? (
+          <AgentWorkflowPanel
+            patientDisplayId={workflowPatientId}
+            isSubmitting={isSubmitting}
+            onDismiss={() => setWorkflowPatientId(null)}
+          />
+        ) : null}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-medium text-sky-700">Patient intake</p>
@@ -363,10 +399,29 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
               <TextInput label="Chief complaint" value={form.chiefComplaint} onChange={handleTextChange('chiefComplaint')} required placeholder="Chest pressure and nausea" />
               <TextInput label="Structured symptoms" value={form.structuredSymptoms} onChange={handleTextChange('structuredSymptoms')} placeholder="shortness of breath, nausea" />
 
-              <label className="text-sm font-medium text-slate-700">
-                Symptom notes
-                <textarea value={form.symptomNotes} onChange={handleTextChange('symptomNotes')} rows={3} className="input-field h-auto resize-y py-2" />
-              </label>
+              <div className="text-sm font-medium text-slate-700">
+                <div className="flex items-center justify-between gap-2">
+                  <span>Symptom notes</span>
+                  <button
+                    type="button"
+                    onClick={() => void generateSymptomNotes()}
+                    disabled={isDraftingNotes || !form.chiefComplaint.trim()}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 text-[11px] font-semibold text-violet-800 ring-1 ring-inset ring-violet-200 transition hover:bg-violet-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    title={form.chiefComplaint.trim() ? 'Draft notes with Savi from the fields already filled' : 'Fill the chief complaint first'}
+                  >
+                    {isDraftingNotes ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Sparkles size={12} aria-hidden="true" />}
+                    {isDraftingNotes ? 'Drafting...' : 'Generate with Savi'}
+                  </button>
+                </div>
+                <textarea
+                  value={form.symptomNotes}
+                  onChange={handleTextChange('symptomNotes')}
+                  rows={3}
+                  className="input-field h-auto resize-y py-2"
+                  placeholder="Objective observations - or generate from the fields already filled"
+                />
+                {notesError ? <p className="mt-1 text-xs font-normal text-rose-700">{notesError}</p> : null}
+              </div>
 
               <label className="text-sm font-medium text-slate-700">
                 Clinical distress
@@ -504,26 +559,3 @@ function VitalInput({ label, value, onChange, step = '1' }: VitalInputProps) {
   );
 }
 
-function DiagnosisLoadingOverlay({ patientDisplayId }: { patientDisplayId: string }) {
-  return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center rounded-lg bg-white/80 px-4 pt-24 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-lg border border-emerald-200 bg-white p-5 text-center shadow-2xl">
-        <div className="relative mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50">
-          <span className="absolute h-3 w-3 rounded-full bg-emerald-600 animate-orbit" />
-          <span className="absolute inset-4 overflow-hidden rounded-full border border-emerald-200">
-            <span className="block h-8 bg-emerald-200/40 animate-scan-line" />
-          </span>
-          <BrainCircuit size={34} className="relative text-emerald-700" aria-hidden="true" />
-        </div>
-        <h3 className="mt-4 text-base font-semibold text-slate-950">Savi is assessing {patientDisplayId}</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          Generating suggested diagnosis, urgency, and medical attention notes from the intake.
-        </p>
-        <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white">
-          <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-          Waiting for complete LLM response
-        </div>
-      </div>
-    </div>
-  );
-}

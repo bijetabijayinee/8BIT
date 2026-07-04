@@ -118,7 +118,7 @@ export function CareBoard({ departments }: { departments: string[] }) {
       </div>
 
       {error ? (
-        <div className="mt-5 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <div className="mt-5 flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
           <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
           <p>{error}</p>
         </div>

@@ -18,8 +18,10 @@ import {
 } from 'lucide-react';
 import { type PointerEvent, useCallback, useEffect, useState } from 'react';
 import { getDepartments, getStaffUsers } from '../api/client';
+import { Toaster } from '../components/toast';
 import { AiAgentChat, AiChatPage } from '../features/ai-chat';
-import { HospitalLiveChat } from '../features/ai-chat/HospitalLiveChat';
+import { ChatDock } from '../features/ai-chat/ChatDock';
+import { NotificationsPanel } from '../features/notifications/NotificationsPanel';
 import { AllocationDashboard } from '../features/allocation';
 import { CareBoard } from '../features/board';
 import { AppointmentsCalendar } from '../features/calendar/AppointmentsCalendar';
@@ -44,6 +46,15 @@ const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: Lucid
   { route: 'knowledge', label: 'Knowledge', icon: FileUp },
   { route: 'calendar', label: 'Calendar', icon: CalendarDays },
 ];
+
+// The patient queue is an intake/triage tool; doctors work from assignment cards and
+// notifications instead, so it is hidden from the DOCTOR role.
+function canSeeRoute(route: WorkspaceRoute, role: StaffRole | undefined) {
+  if (route === 'queue') {
+    return role !== 'DOCTOR';
+  }
+  return true;
+}
 
 const demoUsers: DemoUser[] = [
   { id: 'doctor', name: 'Demo Doctor', role: 'DOCTOR', dashboard: 'Doctor dashboard' },
@@ -129,6 +140,14 @@ function WorkspaceApp() {
     }
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+
+  // Keep the active route allowed for the current role (doctors cannot open the queue).
+  useEffect(() => {
+    if (!canSeeRoute(activeRoute, currentUser?.role)) {
+      window.location.hash = '#/home';
+      setActiveRoute('home');
+    }
+  }, [activeRoute, currentUser?.role]);
 
   useEffect(() => {
     if (!currentUser || staffUsers.length === 0 || activeStaffId) {
@@ -298,7 +317,7 @@ function WorkspaceApp() {
           </label>
 
           <nav className="mt-6 space-y-1" aria-label="Workspace routes">
-            {navigationItems.map(({ route, label, icon: Icon }) => (
+            {navigationItems.filter((item) => canSeeRoute(item.route, currentUser.role)).map(({ route, label, icon: Icon }) => (
               <button
                 key={route}
                 type="button"
@@ -345,7 +364,7 @@ function WorkspaceApp() {
               </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {navigationItems.map(({ route, label }) => (
+              {navigationItems.filter((item) => canSeeRoute(item.route, currentUser.role)).map(({ route, label }) => (
                 <button
                   key={route}
                   type="button"
@@ -391,7 +410,7 @@ function WorkspaceApp() {
                 onNavigate={navigate}
               />
             ) : null}
-            {activeRoute === 'queue' ? (
+            {activeRoute === 'queue' && canSeeRoute('queue', currentUser.role) ? (
               <QueueTable
                 refreshSignal={queueRefreshKey}
                 searchQuery={searchQuery}
@@ -412,6 +431,9 @@ function WorkspaceApp() {
           </div>
         </section>
       </div>
+
+      <ChatDock activeStaff={activeStaff} onAction={handleAiAction} />
+      <Toaster />
     </main>
   );
 }
@@ -495,67 +517,71 @@ function HomeWorkspace({
   onAction: (action: string) => void;
   onNavigate: (route: WorkspaceRoute) => void;
 }) {
+  const quickLinks = [
+    { label: 'Live queue', description: 'Triage priority', route: 'queue' as WorkspaceRoute },
+    { label: 'LLM intake', description: 'Register arrival', route: 'intake' as WorkspaceRoute },
+    { label: 'Beds & doctors', description: 'Allocation', route: 'allocation' as WorkspaceRoute },
+    { label: 'Care board', description: 'Workflow', route: 'board' as WorkspaceRoute },
+    { label: 'Savi knowledge', description: 'Docs & patients', route: 'knowledge' as WorkspaceRoute },
+    { label: 'Dashboard', description: 'Agent analytics', route: 'dashboard' as WorkspaceRoute },
+  ].filter((item) => canSeeRoute(item.route, currentUser.role));
+
   return (
-    <section aria-labelledby="home-title" className="py-6">
-      <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section aria-labelledby="home-title" className="space-y-6 py-6">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-lg sm:p-8">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
+        <div className="pointer-events-none absolute -bottom-20 left-1/3 h-56 w-56 rounded-full bg-sky-500/10 blur-3xl" aria-hidden="true" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-emerald-700">Home</p>
-            <h2 id="home-title" className="mt-1 text-2xl font-semibold text-slate-950 sm:text-3xl">
-              Careflow Healthcare Autonomous systems
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-emerald-200 ring-1 ring-inset ring-white/15">
+              <span className="h-1.5 w-1.5 animate-soft-pulse rounded-full bg-emerald-400" />
+              Autonomous care operations
+            </span>
+            <h2 id="home-title" className="mt-4 text-2xl font-semibold tracking-tight sm:text-4xl">
+              Welcome back, {currentUser.name.replace(/^Demo\s+/, '')}
             </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Coordinate triage, intake intelligence, doctor assignment, beds, reports, hospital knowledge, and live care-team messaging from one clinical operations view.
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+              CareFlow's agents triage every arrival, sort the queue, assign the right doctor, notify the care team,
+              and research the condition - so your team acts faster under pressure.
             </p>
+            <div className="mt-5 flex flex-wrap gap-2 text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-inset ring-white/15">
+                <UsersRound size={13} aria-hidden="true" />
+                {activeStaff ? `${activeStaff.displayName} - ${activeStaff.staffCode}` : currentUser.name}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-inset ring-white/15">
+                {currentUser.dashboard}
+              </span>
+            </div>
           </div>
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-emerald-700 text-white animate-soft-pulse">
-            <MessageSquareText size={20} aria-hidden="true" />
+          <span className="hidden h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-inset ring-white/20 lg:flex">
+            <MessageSquareText size={28} aria-hidden="true" />
           </span>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-          {[
-            { label: 'Live queue', route: 'queue' as WorkspaceRoute },
-            { label: 'LLM intake', route: 'intake' as WorkspaceRoute },
-            { label: 'Beds and doctors', route: 'allocation' as WorkspaceRoute },
-            { label: 'Care board', route: 'board' as WorkspaceRoute },
-            { label: 'Savi knowledge', route: 'knowledge' as WorkspaceRoute },
-            { label: 'Calendar', route: 'calendar' as WorkspaceRoute },
-          ].map((item) => (
+        <div className="relative mt-6 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+          {quickLinks.map((item) => (
             <button
               key={item.route}
               type="button"
               onClick={() => onNavigate(item.route)}
-              className="rounded-md border border-slate-200 bg-slate-50 p-3 text-left text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50"
+              className="group rounded-xl bg-white/10 p-3 text-left ring-1 ring-inset ring-white/10 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/15"
             >
-              {item.label}
+              <p className="text-sm font-semibold text-white">{item.label}</p>
+              <p className="mt-0.5 text-[11px] text-slate-300">{item.description}</p>
             </button>
           ))}
         </div>
-
-        <div className="mt-5 grid gap-3 text-sm sm:grid-cols-4">
-          {[
-            currentUser.dashboard,
-            'Autonomous triage',
-            'Semantic intake memory',
-            'Directory-aware Savi chat',
-          ].map((label) => (
-            <div key={label} className="min-w-0 rounded-md border border-emerald-100 bg-emerald-50 p-3 font-medium text-emerald-900">
-              {label}
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-5 rounded-md bg-slate-950 p-4 text-sm text-white">
-          Active staff: {activeStaff ? `${activeStaff.displayName} (${activeStaff.staffCode})` : currentUser.name}
-        </div>
       </div>
 
-      <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <AiAgentChat activeStaff={activeStaff} onAction={onAction} embedded />
-        <HospitalLiveChat activeStaff={activeStaff} />
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <div className="min-w-0">
+          <AiAgentChat activeStaff={activeStaff} onAction={onAction} embedded />
+        </div>
+        <div className="min-h-[34rem]">
+          <NotificationsPanel activeStaff={activeStaff} />
+        </div>
       </div>
-
     </section>
   );
 }

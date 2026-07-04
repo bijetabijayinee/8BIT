@@ -215,10 +215,16 @@ export interface QueueMetrics {
   overrideCount: number;
 }
 
+export interface ChatTurn {
+  role: 'staff' | 'assistant';
+  text: string;
+}
+
 export interface AiChatRequest {
   message: string;
   actorName?: string;
   actorRole?: StaffRole;
+  history?: ChatTurn[];
 }
 
 export interface AiChatResponse {
@@ -241,6 +247,115 @@ export interface KnowledgeDocument {
   fileName: string;
   contentLength: number;
   updatedAt: string;
+}
+
+export interface PatientFile {
+  fileName: string;
+  fileType: string | null;
+  url: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface PatientDirectoryEntry {
+  patientId: string;
+  patientDisplayId: string;
+  ageBand: AgeBand;
+  department: string | null;
+  chiefComplaint: string | null;
+  currentStatus: QueueStatus | null;
+  urgencyCategory: UrgencyCategory | null;
+  urgencyScore: number | null;
+  suggestedDiagnosis: string | null;
+  medicalAttentionNote: string | null;
+  assignedDoctor: string | null;
+  arrivedAt: string | null;
+  files: PatientFile[];
+}
+
+export interface WorkflowEvent {
+  patientDisplayId: string;
+  stage: string;
+  agent: string;
+  title: string;
+  detail: string;
+  reasoning: string | null;
+  timestamp: string;
+}
+
+export interface StaffNotification {
+  id: string;
+  recipientRole: StaffRole;
+  patientDisplayId: string | null;
+  agent: string;
+  category: string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface PatientStoryCitation {
+  title: string;
+  url: string;
+}
+
+export interface PatientStory {
+  patientId: string;
+  patientDisplayId: string;
+  ageBand: AgeBand;
+  department: string | null;
+  chiefComplaint: string | null;
+  structuredSymptoms: string[];
+  currentStatus: QueueStatus | null;
+  arrivedAt: string;
+  assessment: {
+    finalCategory: UrgencyCategory;
+    finalScore: number;
+    suggestedDiagnosis: string | null;
+    medicalAttentionNote: string | null;
+    structuredSymptomSummary: string | null;
+    staffFacingExplanation: string | null;
+    confidenceLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    scoreFactors: string[];
+    redFlagIndicators: string[];
+    missingOrAmbiguousDetails: string[];
+  } | null;
+  assignment: {
+    doctorName: string;
+    doctorSpecialty: string | null;
+    reason: string;
+    assignedAt: string;
+  } | null;
+  research: {
+    briefing: string;
+    citations: PatientStoryCitation[];
+  } | null;
+  timeline: PatientTimelineEvent[];
+  files: PatientFile[];
+}
+
+export interface AgentTrendPoint {
+  label: string;
+  count: number;
+}
+
+export interface AgentPerformance {
+  code: string;
+  name: string;
+  description: string;
+  active: boolean;
+  totalActions: number;
+  actionsLast24h: number;
+  lastActiveAt: string | null;
+  trend: AgentTrendPoint[];
+  recentActivity: string[];
+}
+
+export interface AgentPerformanceResponse {
+  patientsProcessed: number;
+  agentActionsTotal: number;
+  agents: AgentPerformance[];
 }
 
 export interface HospitalChatMessage {

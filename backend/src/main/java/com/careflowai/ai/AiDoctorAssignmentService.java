@@ -20,7 +20,8 @@ public class AiDoctorAssignmentService {
         Return only compact JSON with: staffCode, assignmentReason.
         staffCode must exactly match one availableDoctors[].staffCode.
         Base the assignment on urgency, department, specialty fit, symptoms, risk flags, vitals, and workload context
-        supplied in the payload. Keep assignmentReason under 300 characters.
+        supplied in the payload. If medicalResearchBriefing is present, use it to judge which specialty
+        the condition needs. Keep assignmentReason under 300 characters.
         """;
 
     private final OpenAiResponsesClient responsesClient;
@@ -33,6 +34,11 @@ public class AiDoctorAssignmentService {
 
     public Optional<AiDoctorAssignmentOutput> recommend(Intake intake, UrgencyAssessment assessment,
                                                         List<StaffUser> availableDoctors) {
+        return recommend(intake, assessment, availableDoctors, null);
+    }
+
+    public Optional<AiDoctorAssignmentOutput> recommend(Intake intake, UrgencyAssessment assessment,
+                                                        List<StaffUser> availableDoctors, String researchBriefing) {
         if (!responsesClient.isAvailable() || availableDoctors.isEmpty()) {
             return Optional.empty();
         }
@@ -40,7 +46,7 @@ public class AiDoctorAssignmentService {
         try {
             String response = responsesClient.respond(
                 INSTRUCTION,
-                objectMapper.writeValueAsString(payload(intake, assessment, availableDoctors))
+                objectMapper.writeValueAsString(payload(intake, assessment, availableDoctors, researchBriefing))
             );
             JsonNode json = objectMapper.readTree(extractJson(response));
             String staffCode = text(json, "staffCode");
@@ -54,10 +60,14 @@ public class AiDoctorAssignmentService {
         }
     }
 
-    private Map<String, Object> payload(Intake intake, UrgencyAssessment assessment, List<StaffUser> availableDoctors) {
+    private Map<String, Object> payload(Intake intake, UrgencyAssessment assessment, List<StaffUser> availableDoctors,
+                                        String researchBriefing) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("intake", intakePayload(intake));
         payload.put("urgencyAssessment", assessmentPayload(assessment));
+        if (researchBriefing != null && !researchBriefing.isBlank()) {
+            payload.put("medicalResearchBriefing", researchBriefing);
+        }
         payload.put("availableDoctors", availableDoctors.stream()
             .map(this::doctorPayload)
             .toList());

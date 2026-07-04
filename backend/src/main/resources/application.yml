@@ -33,6 +33,8 @@ spring:
 
 server:
   port: ${PORT}
+  error:
+    include-message: always
 
 management:
   endpoints:

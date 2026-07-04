@@ -4,10 +4,10 @@ import { getAgentDashboard, resolveFlashcard } from '../../api/client';
 import type { AgentDashboard, PatientFlashcard, PatientTimelineEvent, UrgencyCategory } from '../../types/careflow';
 
 const urgencyStyles: Record<UrgencyCategory, string> = {
-  CRITICAL: 'bg-red-100 text-red-800 ring-red-200',
+  CRITICAL: 'bg-rose-100 text-rose-800 ring-rose-200',
   HIGH: 'bg-amber-100 text-amber-800 ring-amber-200',
   MEDIUM: 'bg-sky-100 text-sky-800 ring-sky-200',
-  LOW: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
+  LOW: 'bg-indigo-100 text-indigo-800 ring-indigo-200',
 };
 
 interface AgentDashboardPanelProps {
@@ -113,7 +113,7 @@ export function AgentDashboardPanel({ refreshSignal = 0 }: AgentDashboardPanelPr
       </div>
 
       {error ? (
-        <div className="mt-5 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <div className="mt-5 flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
           <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
           <p>{error}</p>
         </div>
@@ -138,7 +138,7 @@ export function AgentDashboardPanel({ refreshSignal = 0 }: AgentDashboardPanelPr
             ))
           )}
           {!isLoading && resolvedCards.length > 0 ? (
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900 md:col-span-2">
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900 md:col-span-2">
               {resolvedCards.length} resolved card{resolvedCards.length === 1 ? '' : 's'} in the current view.
             </div>
           ) : null}
