@@ -61,6 +61,7 @@ F:\projects\careflow-ai\backend\src\main\java\com\careflowai\common\OverrideReas
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\common\QueueStatus.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\common\StaffRole.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\common\UrgencyCategory.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\config\CorsConfig.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\config\OpenApiConfig.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\intake\dto\CreateIntakeRequest.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\intake\dto\IntakeResponse.java

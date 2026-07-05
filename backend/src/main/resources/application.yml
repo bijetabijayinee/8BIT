@@ -55,6 +55,9 @@ springdoc:
     operations-sorter: method
     tags-sorter: alpha
 
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
 openai:
   enabled: ${OPENAI_ENABLED}
   api-key: ${OPENAI_API_KEY}
