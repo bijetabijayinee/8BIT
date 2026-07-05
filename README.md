@@ -239,5 +239,3 @@ sidecar is an optional scale-out path for conversational AI and patient vector s
 over AMQP) — set `AI_SERVICE_URL` to route chat there, leave it empty to skip it entirely.
 
 ---
-
-*Built with ❤️ by **Chandan Pandey** for the OpenAI Agentic AI Hackathon.*
