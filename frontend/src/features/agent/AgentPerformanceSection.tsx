@@ -1,8 +1,21 @@
-import { Activity, BellRing, Bot, Globe, ListOrdered, Loader2, Stethoscope, Zap, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { Area, AreaChart, ResponsiveContainer, Tooltip } from 'recharts';
+import {
+  Activity,
+  BellRing,
+  Bot,
+  Gauge,
+  Globe,
+  ListOrdered,
+  Loader2,
+  Microscope,
+  Stethoscope,
+  Timer,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getAgentPerformance } from '../../api/client';
-import type { AgentPerformance, AgentPerformanceResponse } from '../../types/careflow';
+import type { AgentPerformance, AgentPerformanceResponse, AgentTrendPoint, PipelineObservability } from '../../types/careflow';
 
 const agentIcon: Record<string, LucideIcon> = {
   PRIORITY_AGENT: ListOrdered,
@@ -88,13 +101,137 @@ export function AgentPerformanceSection({ refreshSignal = 0 }: { refreshSignal?:
           No agent activity recorded yet. Create an intake to see the agents work.
         </div>
       ) : (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {data.agents.map((agent) => (
-            <AgentCard key={agent.code} agent={agent} />
-          ))}
-        </div>
+        <>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {data.agents.map((agent) => (
+              <AgentCard key={agent.code} agent={agent} />
+            ))}
+          </div>
+          {data.pipeline ? <PipelinePanel pipeline={data.pipeline} /> : null}
+        </>
       )}
     </section>
+  );
+}
+
+function formatSeconds(seconds: number | null) {
+  if (seconds === null || Number.isNaN(seconds)) {
+    return '—';
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds % 60)}s`;
+}
+
+function PipelinePanel({ pipeline }: { pipeline: PipelineObservability }) {
+  return (
+    <div className="mt-6">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white">
+          <Gauge size={16} aria-hidden="true" />
+        </span>
+        <div>
+          <h4 className="text-base font-semibold text-slate-950">Pipeline observability</h4>
+          <p className="text-xs text-slate-500">Cross-agent latency, coverage, load, and triage quality signals</p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <ObservabilityTile
+          icon={Timer}
+          label="Intake → doctor assigned"
+          value={formatSeconds(pipeline.avgIntakeToAssignSeconds)}
+          hint="Average time for the agents to triage, research, and pick a doctor"
+        />
+        <ObservabilityTile
+          icon={Microscope}
+          label="Intake → research briefed"
+          value={formatSeconds(pipeline.avgIntakeToResearchSeconds)}
+          hint="Average time until live medical sources were summarized"
+        />
+        <ObservabilityTile
+          icon={Globe}
+          label="Research coverage"
+          value={`${pipeline.researchCoveragePercent}%`}
+          hint="Share of intakes that received a sourced research briefing"
+        />
+        <ObservabilityTile
+          icon={Zap}
+          label="Agent actions per patient"
+          value={pipeline.actionsPerPatient.toFixed(1)}
+          hint="Automated decisions and updates recorded per intake"
+        />
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
+        <ObservabilityChart title="Agent activity (last 12h)">
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={pipeline.hourlyActivity} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e2e8f0' }} />
+              <Bar dataKey="count" name="Agent actions" fill="#10b981" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ObservabilityChart>
+        <ObservabilityChart title="Triage urgency mix">
+          <DistributionBars points={pipeline.urgencyMix} color="#0284c7" />
+        </ObservabilityChart>
+        <ObservabilityChart title="Triage confidence mix">
+          <DistributionBars points={pipeline.confidenceMix} color="#6366f1" />
+        </ObservabilityChart>
+      </div>
+    </div>
+  );
+}
+
+function ObservabilityTile({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: string; value: string; hint: string }) {
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-slate-500">{label}</p>
+        <Icon size={16} className="text-emerald-700" aria-hidden="true" />
+      </div>
+      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+      <p className="mt-1 text-[11px] leading-4 text-slate-400">{hint}</p>
+    </article>
+  );
+}
+
+function ObservabilityChart({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h5 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h5>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function DistributionBars({ points, color }: { points: AgentTrendPoint[]; color: string }) {
+  if (points.length === 0) {
+    return <p className="py-8 text-center text-xs text-slate-400">No assessments yet.</p>;
+  }
+  const max = Math.max(...points.map((point) => point.count), 1);
+  return (
+    <ul className="space-y-2.5">
+      {points.map((point) => (
+        <li key={point.label}>
+          <div className="flex items-center justify-between text-[11px] font-medium text-slate-600">
+            <span>{point.label.charAt(0) + point.label.slice(1).toLowerCase()}</span>
+            <span>{point.count}</span>
+          </div>
+          <div className="mt-1 h-2 rounded-full bg-slate-100">
+            <div
+              className="h-2 rounded-full transition-all duration-500"
+              style={{ width: `${(point.count / max) * 100}%`, backgroundColor: color }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

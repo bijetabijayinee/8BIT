@@ -1,4 +1,17 @@
-import { Activity, AlertCircle, ClipboardPlus, Loader2, RotateCcw, Save, Sparkles, Stethoscope } from 'lucide-react';
+import {
+  Activity,
+  AlertCircle,
+  ClipboardList,
+  ClipboardPlus,
+  HeartPulse,
+  Loader2,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  Sparkles,
+  Stethoscope,
+  UserRound,
+} from 'lucide-react';
 import { type ChangeEvent, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { createIntake, draftSymptomNotes, getNextPatientDisplayId } from '../../api/client';
 import { AgentWorkflowPanel } from './AgentWorkflowPanel';
@@ -69,7 +82,17 @@ const defaultVitals: Vitals = {
   oxygenSaturation: 98,
 };
 
+const genderOptions = [
+  { value: '', label: 'Not disclosed' },
+  { value: 'Female', label: 'Female' },
+  { value: 'Male', label: 'Male' },
+  { value: 'Other', label: 'Other' },
+];
+
 interface IntakeFormState {
+  patientName: string;
+  gender: string;
+  contactPhone: string;
   ageBand: AgeBand;
   arrivalTimestamp: string;
   arrivalMode: ArrivalMode;
@@ -96,6 +119,9 @@ function toDateTimeLocalValue(date: Date) {
 
 function createInitialState(departments: string[]): IntakeFormState {
   return {
+    patientName: '',
+    gender: '',
+    contactPhone: '',
     ageBand: 'ADULT',
     arrivalTimestamp: toDateTimeLocalValue(new Date()),
     arrivalMode: 'WALK_IN',
@@ -207,6 +233,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
 
   const buildRequest = (): CreateIntakeRequest => ({
     patientDisplayId: patientDisplayId.startsWith('Generating') ? undefined : patientDisplayId,
+    patientName: normalizeOptionalText(form.patientName),
+    gender: normalizeOptionalText(form.gender),
+    contactPhone: normalizeOptionalText(form.contactPhone),
     ageBand: form.ageBand,
     arrivalTimestamp: new Date(form.arrivalTimestamp).toISOString(),
     arrivalMode: form.arrivalMode,
@@ -359,12 +388,16 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
         ) : null}
 
         <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <FormBlock title="Patient and arrival">
+          <FormBlock title="Patient & arrival" icon={<UserRound size={15} aria-hidden="true" />} tint="bg-sky-100 text-sky-700">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2">
+              <div className="rounded-md border border-sky-200 bg-gradient-to-br from-sky-50 to-emerald-50 px-3 py-2 sm:col-span-2">
                 <p className="text-xs font-semibold uppercase tracking-normal text-sky-700">Patient ID</p>
                 <p className="mt-1 text-lg font-semibold text-slate-950">{patientDisplayId}</p>
               </div>
+
+              <TextInput label="Patient name" value={form.patientName} onChange={handleTextChange('patientName')} placeholder="Full name (optional)" />
+              <SelectInput label="Gender" value={form.gender} onChange={(value) => updateField('gender', value)} options={genderOptions} />
+              <TextInput label="Contact phone" value={form.contactPhone} onChange={handleTextChange('contactPhone')} placeholder="+91 98… (optional)" />
 
               <label className="text-sm font-medium text-slate-700">
                 Department
@@ -394,14 +427,14 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
             </div>
           </FormBlock>
 
-          <FormBlock title="Presentation">
+          <FormBlock title="Presentation" icon={<ClipboardList size={15} aria-hidden="true" />} tint="bg-violet-100 text-violet-700">
             <div className="grid gap-3">
               <TextInput label="Chief complaint" value={form.chiefComplaint} onChange={handleTextChange('chiefComplaint')} required placeholder="Chest pressure and nausea" />
               <TextInput label="Structured symptoms" value={form.structuredSymptoms} onChange={handleTextChange('structuredSymptoms')} placeholder="shortness of breath, nausea" />
 
               <div className="text-sm font-medium text-slate-700">
                 <div className="flex items-center justify-between gap-2">
-                  <span>Symptom notes</span>
+                  <span>Intake notes</span>
                   <button
                     type="button"
                     onClick={() => void generateSymptomNotes()}
@@ -442,7 +475,22 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
         </div>
 
         <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <FormBlock title="Vitals">
+          <FormBlock
+            title="Vitals"
+            icon={<HeartPulse size={15} aria-hidden="true" />}
+            tint="bg-rose-100 text-rose-700"
+            action={
+              <button
+                type="button"
+                onClick={() => updateField('vitals', { ...defaultVitals })}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full bg-slate-100 px-2.5 text-[11px] font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-200"
+                title="Reset all vitals to baseline values"
+              >
+                <RotateCcw size={11} aria-hidden="true" />
+                Reset vitals
+              </button>
+            }
+          >
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <VitalInput label="Temp C" value={form.vitals.temperatureC} onChange={(value) => updateVitals('temperatureC', value)} step="0.1" />
               <VitalInput label="Heart rate" value={form.vitals.heartRate} onChange={(value) => updateVitals('heartRate', value)} />
@@ -453,7 +501,7 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
             </div>
           </FormBlock>
 
-          <FormBlock title="Risk flags">
+          <FormBlock title="Risk flags" icon={<ShieldAlert size={15} aria-hidden="true" />} tint="bg-amber-100 text-amber-700">
             <div className="grid gap-2 sm:grid-cols-2">
               {riskFlagOptions.map((option) => (
                 <label
@@ -479,14 +527,23 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
 
 interface FormBlockProps {
   title: string;
+  icon?: ReactNode;
+  tint?: string;
+  action?: ReactNode;
   className?: string;
   children: ReactNode;
 }
 
-function FormBlock({ title, className = '', children }: FormBlockProps) {
+function FormBlock({ title, icon, tint = 'bg-slate-100 text-slate-700', action, className = '', children }: FormBlockProps) {
   return (
-    <fieldset className={`min-w-0 rounded-lg border border-sky-100 bg-white p-4 shadow-sm ${className}`}>
-      <legend className="px-1 text-sm font-semibold text-slate-900">{title}</legend>
+    <fieldset className={`min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md ${className}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {icon ? <span className={`flex h-7 w-7 items-center justify-center rounded-md ${tint}`}>{icon}</span> : null}
+          <legend className="text-sm font-semibold text-slate-900">{title}</legend>
+        </div>
+        {action ?? null}
+      </div>
       <div className="mt-3">{children}</div>
     </fieldset>
   );

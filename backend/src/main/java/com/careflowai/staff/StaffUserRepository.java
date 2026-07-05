@@ -33,4 +33,6 @@ public interface StaffUserRepository extends JpaRepository<StaffUser, UUID> {
     List<StaffUser> findByRoleAndDepartmentIgnoreCaseOrderByCreatedAtDesc(StaffRole role, String department);
 
     boolean existsByStaffCodeIgnoreCase(String staffCode);
+
+    List<StaffUser> findByPasswordHashIsNull();
 }

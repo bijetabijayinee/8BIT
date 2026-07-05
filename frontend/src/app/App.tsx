@@ -2,29 +2,35 @@ import {
   BedDouble,
   CalendarDays,
   ClipboardPlus,
+  Eye,
+  EyeOff,
   FileUp,
   Gauge,
   GripVertical,
   Hospital,
   Home,
+  KeyRound,
   ListOrdered,
+  Loader2,
   LogIn,
   LogOut,
-  KanbanSquare,
+  ContactRound,
   MessageSquareText,
   Search,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 import { type PointerEvent, useCallback, useEffect, useState } from 'react';
-import { getDepartments, getStaffUsers } from '../api/client';
+import { getDepartments } from '../api/client';
+import { getSession, login, logout, type AuthSession } from '../api/auth';
+import { LoginShowcase } from './LoginShowcase';
 import { Toaster } from '../components/toast';
 import { AiAgentChat, AiChatPage } from '../features/ai-chat';
 import { ChatDock } from '../features/ai-chat/ChatDock';
 import { NotificationsPanel } from '../features/notifications/NotificationsPanel';
 import { AllocationDashboard } from '../features/allocation';
-import { CareBoard } from '../features/board';
 import { AppointmentsCalendar } from '../features/calendar/AppointmentsCalendar';
+import { PatientsDirectoryPage } from '../features/patients';
 import { IntakeForm } from '../features/intake';
 import { KnowledgePage } from '../features/knowledge/KnowledgePage';
 import { MetricsDashboard } from '../features/metrics';
@@ -32,13 +38,12 @@ import { PeopleDirectory } from '../features/people';
 import { QueueTable } from '../features/queue';
 import type { Appointment, StaffRole, StaffUser } from '../types/careflow';
 
-type WorkspaceRoute = 'home' | 'queue' | 'board' | 'intake' | 'allocation' | 'dashboard' | 'people' | 'knowledge' | 'calendar';
-type DemoUser = { id: string; name: string; role: StaffRole; dashboard: string };
+type WorkspaceRoute = 'home' | 'queue' | 'patients' | 'intake' | 'allocation' | 'dashboard' | 'people' | 'knowledge' | 'calendar';
 
 const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: LucideIcon }> = [
   { route: 'home', label: 'Home', icon: Home },
   { route: 'queue', label: 'Queue', icon: ListOrdered },
-  { route: 'board', label: 'Board', icon: KanbanSquare },
+  { route: 'patients', label: 'Patients', icon: ContactRound },
   { route: 'intake', label: 'Intake', icon: ClipboardPlus },
   { route: 'allocation', label: 'Allocation', icon: BedDouble },
   { route: 'dashboard', label: 'Dashboard', icon: Gauge },
@@ -47,23 +52,15 @@ const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: Lucid
   { route: 'calendar', label: 'Calendar', icon: CalendarDays },
 ];
 
-// The patient queue is an intake/triage tool; doctors work from assignment cards and
-// notifications instead, so it is hidden from the DOCTOR role.
-function canSeeRoute(route: WorkspaceRoute, role: StaffRole | undefined) {
-  if (route === 'queue') {
-    return role !== 'DOCTOR';
-  }
-  return true;
-}
-
-const demoUsers: DemoUser[] = [
-  { id: 'doctor', name: 'Demo Doctor', role: 'DOCTOR', dashboard: 'Doctor dashboard' },
-  { id: 'nurse', name: 'Demo Nurse', role: 'TRIAGE_NURSE', dashboard: 'Nursing dashboard' },
-  { id: 'staff', name: 'Demo Staff', role: 'INTAKE_STAFF', dashboard: 'Intake staff dashboard' },
-  { id: 'admin', name: 'Demo Admin', role: 'ADMIN', dashboard: 'Admin dashboard' },
-];
-
 const defaultDepartments = ['Emergency', 'Pediatrics', 'Orthopedics', 'General'];
+
+function roleLabel(role: StaffRole) {
+  return role
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
 
 function routeFromHash(): WorkspaceRoute {
   const hash = window.location.hash.replace('#/', '');
@@ -73,7 +70,7 @@ function routeFromHash(): WorkspaceRoute {
     hash === 'dashboard' ||
     hash === 'queue' ||
     hash === 'people' ||
-    hash === 'board' ||
+    hash === 'patients' ||
     hash === 'allocation' ||
     hash === 'knowledge' ||
     hash === 'calendar'
@@ -98,12 +95,7 @@ function WorkspaceApp() {
   const [navWidth, setNavWidth] = useState(288);
   const [searchQuery, setSearchQuery] = useState('');
   const [departments, setDepartments] = useState<string[]>(defaultDepartments);
-  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
-  const [activeStaffId, setActiveStaffId] = useState('');
-  const [currentUser, setCurrentUser] = useState<DemoUser | null>(() => {
-    const stored = window.localStorage.getItem('careflow-user');
-    return demoUsers.find((user) => user.id === stored) ?? null;
-  });
+  const [session, setSession] = useState<AuthSession | null>(() => getSession());
   const [appointments, setAppointments] = useState<Appointment[]>(() => {
     const stored = window.localStorage.getItem('careflow-appointments');
     if (!stored) {
@@ -115,18 +107,8 @@ function WorkspaceApp() {
       return [];
     }
   });
-  const activeStaff =
-    staffUsers.find((staff) => staff.id === activeStaffId) ??
-    staffUsers.find((staff) => staff.role === currentUser?.role) ??
-    (currentUser
-      ? {
-          id: currentUser.id,
-          staffCode: currentUser.id.toUpperCase(),
-          displayName: currentUser.name,
-          role: currentUser.role,
-          active: true,
-        }
-      : null);
+
+  const activeStaff = session?.staff ?? null;
 
   useEffect(() => {
     window.localStorage.setItem('careflow-appointments', JSON.stringify(appointments));
@@ -141,46 +123,10 @@ function WorkspaceApp() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Keep the active route allowed for the current role (doctors cannot open the queue).
   useEffect(() => {
-    if (!canSeeRoute(activeRoute, currentUser?.role)) {
-      window.location.hash = '#/home';
-      setActiveRoute('home');
-    }
-  }, [activeRoute, currentUser?.role]);
-
-  useEffect(() => {
-    if (!currentUser || staffUsers.length === 0 || activeStaffId) {
+    if (!session) {
       return;
     }
-    setActiveStaffId(staffUsers.find((staff) => staff.role === currentUser.role)?.id ?? staffUsers[0]?.id ?? '');
-  }, [activeStaffId, currentUser, staffUsers]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadStaff() {
-      try {
-        const fetchedStaff = await getStaffUsers();
-        if (isMounted) {
-          const activeStaffUsers = fetchedStaff.filter((staff) => staff.active);
-          setStaffUsers(activeStaffUsers);
-          setActiveStaffId((current) => current || activeStaffUsers[0]?.id || '');
-        }
-      } catch {
-        if (isMounted) {
-          setStaffUsers([]);
-        }
-      }
-    }
-
-    void loadStaff();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     let isMounted = true;
 
     async function loadDepartments() {
@@ -200,22 +146,16 @@ function WorkspaceApp() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [session]);
 
   const navigate = (route: WorkspaceRoute) => {
     window.location.hash = `#/${route}`;
     setActiveRoute(route);
   };
 
-  const handleLogin = (user: DemoUser) => {
-    window.localStorage.setItem('careflow-user', user.id);
-    setCurrentUser(user);
-    setActiveStaffId(staffUsers.find((staff) => staff.role === user.role)?.id ?? '');
-  };
-
   const handleLogout = () => {
-    window.localStorage.removeItem('careflow-user');
-    setCurrentUser(null);
+    logout();
+    setSession(null);
   };
 
   const saveAppointment = (appointment: Appointment) => {
@@ -261,8 +201,8 @@ function WorkspaceApp() {
     }
   };
 
-  if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} />;
+  if (!session || !activeStaff) {
+    return <LoginScreen onLogin={setSession} />;
   }
 
   return (
@@ -282,25 +222,12 @@ function WorkspaceApp() {
             </div>
           </div>
 
-          <label className="mt-6 block text-sm font-medium text-slate-700">
-            Active staff
-            <select
-              value={activeStaff?.id ?? ''}
-              onChange={(event) => setActiveStaffId(event.target.value)}
-              className="input-field"
-            >
-              {staffUsers.length === 0 ? <option value="">Demo Staff</option> : null}
-              {staffUsers.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.displayName} - {staff.staffCode}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-900">
-            <p className="font-semibold">{currentUser.dashboard}</p>
-            <p className="mt-1">{currentUser.name} - {currentUser.role.replace(/_/g, ' ')}</p>
+          <div className="mt-6 rounded-md border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-900">
+            <p className="font-semibold">{activeStaff.displayName}</p>
+            <p className="mt-1">
+              {activeStaff.staffCode} - {roleLabel(activeStaff.role)}
+              {activeStaff.department ? ` - ${activeStaff.department}` : ''}
+            </p>
           </div>
 
           <label className="mt-4 block text-sm font-medium text-slate-700">
@@ -317,7 +244,7 @@ function WorkspaceApp() {
           </label>
 
           <nav className="mt-6 space-y-1" aria-label="Workspace routes">
-            {navigationItems.filter((item) => canSeeRoute(item.route, currentUser.role)).map(({ route, label, icon: Icon }) => (
+            {navigationItems.map(({ route, label, icon: Icon }) => (
               <button
                 key={route}
                 type="button"
@@ -362,9 +289,12 @@ function WorkspaceApp() {
                 </div>
                 <p className="font-semibold">CareFlow AI</p>
               </div>
+              <p className="truncate text-xs font-medium text-slate-600">
+                {activeStaff.displayName} - {activeStaff.staffCode}
+              </p>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {navigationItems.filter((item) => canSeeRoute(item.route, currentUser.role)).map(({ route, label }) => (
+              {navigationItems.map(({ route, label }) => (
                 <button
                   key={route}
                   type="button"
@@ -379,18 +309,6 @@ function WorkspaceApp() {
                 </button>
               ))}
             </div>
-            <select
-              value={activeStaff?.id ?? ''}
-              onChange={(event) => setActiveStaffId(event.target.value)}
-              className="mt-3 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm"
-            >
-              {staffUsers.length === 0 ? <option value="">Demo Staff</option> : null}
-              {staffUsers.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.displayName} - {staff.staffCode}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
               onClick={handleLogout}
@@ -403,14 +321,9 @@ function WorkspaceApp() {
 
           <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
             {activeRoute === 'home' ? (
-              <HomeWorkspace
-                activeStaff={activeStaff}
-                currentUser={currentUser}
-                onAction={handleAiAction}
-                onNavigate={navigate}
-              />
+              <HomeWorkspace activeStaff={activeStaff} onAction={handleAiAction} onNavigate={navigate} />
             ) : null}
-            {activeRoute === 'queue' && canSeeRoute('queue', currentUser.role) ? (
+            {activeRoute === 'queue' ? (
               <QueueTable
                 refreshSignal={queueRefreshKey}
                 searchQuery={searchQuery}
@@ -422,7 +335,7 @@ function WorkspaceApp() {
             {activeRoute === 'intake' ? (
               <IntakeForm departments={departments} activeStaff={activeStaff} onCreated={refreshOperationalViews} />
             ) : null}
-            {activeRoute === 'board' ? <CareBoard departments={departments} /> : null}
+            {activeRoute === 'patients' ? <PatientsDirectoryPage /> : null}
             {activeRoute === 'allocation' ? <AllocationDashboard /> : null}
             {activeRoute === 'dashboard' ? <MetricsDashboard refreshSignal={metricsRefreshKey} /> : null}
             {activeRoute === 'people' ? <PeopleDirectory departments={departments} /> : null}
@@ -438,82 +351,147 @@ function WorkspaceApp() {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: DemoUser) => void }) {
-  const [selectedUserId, setSelectedUserId] = useState(demoUsers[0].id);
+function LoginScreen({ onLogin }: { onLogin: (session: AuthSession) => void }) {
+  const [staffCode, setStaffCode] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const selectedUser = demoUsers.find((user) => user.id === selectedUserId) ?? demoUsers[0];
+  const [pending, setPending] = useState(false);
 
-  const submit = () => {
-    if (password !== 'careflow') {
-      setError('Use password careflow for the demo login.');
+  const submit = async () => {
+    if (!staffCode.trim() || !password) {
+      setError('Enter your staff code and password.');
       return;
     }
-    onLogin(selectedUser);
+    setPending(true);
+    setError(null);
+    try {
+      const session = await login(staffCode.trim(), password);
+      onLogin(session);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Login failed. Try again.');
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 p-4 text-slate-950">
-      <section className="w-full max-w-md rounded-lg border border-sky-100 bg-white p-5 shadow-xl">
-        <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-950 text-white">
-            <Hospital size={21} aria-hidden="true" />
-          </span>
-          <div>
-            <p className="text-sm font-medium text-sky-700">CareFlow login</p>
-            <h1 className="text-xl font-semibold text-slate-950">Choose workspace role</h1>
-          </div>
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-950">
+      <div className="mx-auto grid min-h-screen w-full max-w-7xl lg:grid-cols-[1.15fr_0.85fr]">
+        {/* Project story + animated agent pipeline (hidden on small screens) */}
+        <div className="hidden lg:block">
+          <LoginShowcase />
         </div>
 
-        <label className="mt-5 block text-sm font-medium text-slate-700">
-          User
-          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} className="input-field">
-            {demoUsers.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name} - {user.role.replace(/_/g, ' ')}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="mt-3 block text-sm font-medium text-slate-700">
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                submit();
-              }
-            }}
-            className="input-field"
-            placeholder="careflow"
-          />
-        </label>
+        {/* Login card */}
+        <div className="flex items-center justify-center p-4 sm:p-8">
+          <section className="w-full max-w-md rounded-2xl border border-white/10 bg-white p-6 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-950 text-white">
+                <Hospital size={21} aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-emerald-700">CareFlow login</p>
+                <h1 className="text-xl font-semibold text-slate-950">Sign in to your workspace</h1>
+              </div>
+            </div>
 
-        {error ? <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+            {/* Compact story recap for small screens where the showcase is hidden */}
+            <p className="mt-4 rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-600 lg:hidden">
+              CareFlow AI is an agentic triage platform: three AI agents assess urgency, research the
+              condition in live medical literature, and match the right doctor - on every intake.
+            </p>
 
-        <button
-          type="button"
-          onClick={submit}
-          className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800"
-        >
-          <LogIn size={16} aria-hidden="true" />
-          Login
-        </button>
-      </section>
+            <label className="mt-5 block text-sm font-medium text-slate-700">
+              Staff code
+              <input
+                value={staffCode}
+                onChange={(event) => setStaffCode(event.target.value.toUpperCase())}
+                className="input-field"
+                placeholder="e.g. TRIAGE-01"
+                autoComplete="username"
+                autoFocus
+              />
+            </label>
+            <label className="mt-3 block text-sm font-medium text-slate-700">
+              Password
+              <span className="relative mt-1 block">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void submit();
+                    }
+                  }}
+                  className="input-field mt-0 pr-11"
+                  placeholder="Your password"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 transition hover:text-slate-700"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                </button>
+              </span>
+            </label>
+
+            {error ? <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={pending}
+              className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+            >
+              {pending ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <LogIn size={16} aria-hidden="true" />}
+              {pending ? 'Signing in...' : 'Login'}
+            </button>
+
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              <p className="flex items-center gap-1.5 font-semibold text-slate-700">
+                <KeyRound size={13} aria-hidden="true" />
+                Demo accounts - password <span className="font-mono">careflow</span>
+              </p>
+              <table className="mt-2 w-full text-left">
+                <tbody>
+                  <tr>
+                    <td className="py-0.5 text-slate-500">Intake staff</td>
+                    <td className="py-0.5 text-right font-mono font-medium text-slate-800">INTAKE-01</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 text-slate-500">Triage nurse</td>
+                    <td className="py-0.5 text-right font-mono font-medium text-slate-800">TRIAGE-01</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 text-slate-500">Charge nurse</td>
+                    <td className="py-0.5 text-right font-mono font-medium text-slate-800">CHARGE-01</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 text-slate-500">Doctor</td>
+                    <td className="py-0.5 text-right font-mono font-medium text-slate-800">DOCTOR-EM</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
     </main>
   );
 }
 
 function HomeWorkspace({
   activeStaff,
-  currentUser,
   onAction,
   onNavigate,
 }: {
-  activeStaff: StaffUser | null;
-  currentUser: DemoUser;
+  activeStaff: StaffUser;
   onAction: (action: string) => void;
   onNavigate: (route: WorkspaceRoute) => void;
 }) {
@@ -524,7 +502,7 @@ function HomeWorkspace({
     { label: 'Care board', description: 'Workflow', route: 'board' as WorkspaceRoute },
     { label: 'Savi knowledge', description: 'Docs & patients', route: 'knowledge' as WorkspaceRoute },
     { label: 'Dashboard', description: 'Agent analytics', route: 'dashboard' as WorkspaceRoute },
-  ].filter((item) => canSeeRoute(item.route, currentUser.role));
+  ];
 
   return (
     <section aria-labelledby="home-title" className="space-y-6 py-6">
@@ -538,7 +516,7 @@ function HomeWorkspace({
               Autonomous care operations
             </span>
             <h2 id="home-title" className="mt-4 text-2xl font-semibold tracking-tight sm:text-4xl">
-              Welcome back, {currentUser.name.replace(/^Demo\s+/, '')}
+              Welcome back, {activeStaff.displayName}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
               CareFlow's agents triage every arrival, sort the queue, assign the right doctor, notify the care team,
@@ -547,10 +525,10 @@ function HomeWorkspace({
             <div className="mt-5 flex flex-wrap gap-2 text-xs font-medium">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-inset ring-white/15">
                 <UsersRound size={13} aria-hidden="true" />
-                {activeStaff ? `${activeStaff.displayName} - ${activeStaff.staffCode}` : currentUser.name}
+                {activeStaff.displayName} - {activeStaff.staffCode}
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-inset ring-white/15">
-                {currentUser.dashboard}
+                {roleLabel(activeStaff.role)} dashboard
               </span>
             </div>
           </div>

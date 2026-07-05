@@ -2,12 +2,19 @@ import {
   Activity,
   AlertCircle,
   BadgeAlert,
+  BrainCircuit,
   CalendarDays,
+  CalendarPlus,
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
+  ClipboardList,
   Clock3,
+  Download,
+  Droplets,
   FileText,
+  Gauge,
+  HeartPulse,
   Loader2,
   MapPin,
   Pill,
@@ -15,12 +22,15 @@ import {
   RefreshCw,
   ShieldAlert,
   Stethoscope,
+  Thermometer,
   TimerReset,
   Trash2,
   UserRoundCheck,
   UsersRound,
+  Wind,
   X,
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar } from '../../components/Avatar';
@@ -1233,6 +1243,7 @@ function IntakeDetailDialog({
   const [isAssigningDoctor, setIsAssigningDoctor] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
 
   const loadThread = useCallback(async () => {
     if (!intake) {
@@ -1259,6 +1270,7 @@ function IntakeDetailDialog({
     setPrescriptionDraft('');
     setAppointmentTime('');
     setAppointmentNote('');
+    setIsScheduleOpen(false);
   }, [intake?.intakeId]);
 
   const submitComment = async () => {
@@ -1324,6 +1336,8 @@ function IntakeDetailDialog({
       });
       setAppointmentTime('');
       setAppointmentNote('');
+      setIsScheduleOpen(false);
+      showToast('success', 'Visit scheduled', `Next visit saved for ${intake.patientDisplayId}.`);
       await loadThread();
     } catch (caughtError) {
       setThreadError(caughtError instanceof Error ? caughtError.message : 'Unable to save appointment.');
@@ -1365,17 +1379,36 @@ function IntakeDetailDialog({
   return (
     <div className="fixed inset-0 z-40 bg-slate-950/45 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
       <div className="mx-auto flex h-full max-w-6xl min-w-0 flex-col overflow-hidden rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between gap-3 border-b border-sky-100 px-5 py-4">
-          <div>
-            <p className="text-sm font-medium text-sky-700">Intake details</p>
-            <h2 className="text-xl font-semibold text-slate-950">
-              {intake ? intake.patientDisplayId : 'Loading patient'}
-            </h2>
+        <div className="flex items-start justify-between gap-3 border-b border-sky-100 px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Avatar name={intake?.patientDisplayId ?? 'Patient'} kind="patient" />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold text-slate-950">
+                  {intake ? intake.patientDisplayId : 'Loading patient'}
+                </h2>
+                {intake?.assessment ? (
+                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${urgencyStyles[intake.assessment.finalCategory]}`}>
+                    {formatEnumLabel(intake.assessment.finalCategory)} {intake.assessment.finalScore}
+                  </span>
+                ) : null}
+                {intake ? (
+                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${statusStyles[intake.currentStatus]}`}>
+                    {formatEnumLabel(intake.currentStatus)}
+                  </span>
+                ) : null}
+              </div>
+              {intake ? (
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {formatEnumLabel(intake.ageBand)} · {formatEnumLabel(intake.arrivalMode)} · {intake.department} · arrived {formatDateTime(intake.arrivalTimestamp)}
+                </p>
+              ) : null}
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-sky-200 bg-white text-slate-800 transition hover:bg-sky-50"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-sky-200 bg-white text-slate-800 transition hover:bg-sky-50"
             aria-label="Close intake details"
           >
             <X size={18} aria-hidden="true" />
@@ -1391,153 +1424,159 @@ function IntakeDetailDialog({
               <p>{error}</p>
             </div>
           ) : intake ? (
-            <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-              <DetailSection title="Arrival">
-                <DetailGrid
-                  items={[
-                    ['Patient ID', intake.patientDisplayId],
-                    ['Age band', formatEnumLabel(intake.ageBand)],
-                    ['Arrival mode', formatEnumLabel(intake.arrivalMode)],
-                    ['Arrival time', formatDateTime(intake.arrivalTimestamp)],
-                    ['Department', intake.department],
-                    ['Current status', formatEnumLabel(intake.currentStatus)],
-                  ]}
-                />
-              </DetailSection>
+            <div className="space-y-4">
+              {/* Action toolbar: everything staff can do from here */}
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <select
+                  value={selectedDoctorId}
+                  onChange={(event) => setSelectedDoctorId(event.target.value)}
+                  className="input-field mt-0 h-9 w-56 max-w-full text-xs"
+                  aria-label="Assign doctor"
+                >
+                  <option value="">Assign doctor...</option>
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.displayName} - {doctor.specialty ?? doctor.department ?? 'General'}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void assignDoctor()}
+                  disabled={!selectedDoctorId || isAssigningDoctor}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isAssigningDoctor ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Stethoscope size={14} aria-hidden="true" />}
+                  Assign
+                </button>
+                <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" aria-hidden="true" />
+                <WorkflowButton icon={<CalendarPlus size={14} aria-hidden="true" />} onClick={() => setIsScheduleOpen(true)}>
+                  Schedule visit
+                </WorkflowButton>
+                <WorkflowButton icon={<FileText size={14} aria-hidden="true" />} disabled={isGeneratingReport} onClick={() => void createReport()}>
+                  {isGeneratingReport ? 'Generating...' : 'Report'}
+                </WorkflowButton>
+                <WorkflowButton icon={<Pill size={14} aria-hidden="true" />} onClick={generatePrescriptionDraft}>
+                  Prescription
+                </WorkflowButton>
+                <WorkflowButton icon={<PlayCircle size={14} aria-hidden="true" />} onClick={() => void onStatusChange(intake, 'IN_TREATMENT')}>
+                  Start treatment
+                </WorkflowButton>
+              </div>
 
-              <DetailSection title="Presentation">
-                <DetailGrid
-                  items={[
-                    ['Chief complaint', intake.chiefComplaint],
-                    ['Pain/distress', intake.painLevel],
-                    ['Symptoms', intake.structuredSymptoms.length > 0 ? intake.structuredSymptoms.join(', ') : 'Not recorded'],
-                    ['Symptom notes', intake.symptomNotes ?? 'Not recorded'],
-                  ]}
-                />
-              </DetailSection>
+              <div className="grid items-start gap-4 xl:grid-cols-2">
+                {/* Vitals */}
+                <InfoCard icon={<HeartPulse size={15} aria-hidden="true" />} tint="bg-rose-100 text-rose-700" title="Vitals">
+                  <VitalsTable vitals={intake.vitals} />
+                </InfoCard>
 
-              <DetailSection title="Vitals">
-                <DetailGrid
-                  items={[
-                    ['Temp C', formatValue(intake.vitals.temperatureC)],
-                    ['Heart rate', formatValue(intake.vitals.heartRate)],
-                    ['Blood pressure', `${formatValue(intake.vitals.systolicPressure)}/${formatValue(intake.vitals.diastolicPressure)}`],
-                    ['Resp rate', formatValue(intake.vitals.respiratoryRate)],
-                    ['SpO2', formatValue(intake.vitals.oxygenSaturation)],
-                  ]}
-                />
-              </DetailSection>
-
-              <DetailSection title="Risk and assessment">
-                <DetailGrid
-                  items={[
-                    ['Risk flags', activeRiskFlags(intake).length > 0 ? activeRiskFlags(intake).join(', ') : 'None selected'],
-                    ['Final urgency', intake.assessment ? `${intake.assessment.finalCategory} - ${intake.assessment.finalScore}` : 'Not assessed'],
-                    ['LLM diagnosis', intake.assessment?.suggestedDiagnosis ?? 'Not recorded'],
-                    ['Attention needed', intake.assessment?.medicalAttentionNote ?? 'Not recorded'],
-                    ['AI suggestion', intake.assessment?.suggestedCategory ? `${intake.assessment.suggestedCategory} - ${intake.assessment.suggestedScore}` : 'No suggestion'],
-                    ['Symptom summary', intake.assessment?.structuredSymptomSummary ?? 'Not recorded'],
-                    ['Score factors', intake.assessment?.scoreFactors.join(', ') ?? 'Not recorded'],
-                    ['Explanation', intake.assessment?.staffFacingExplanation ?? 'Not recorded'],
-                  ]}
-                />
-              </DetailSection>
-
-              <DetailSection title="Patient actions">
-                <div className="grid gap-3">
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                    <select
-                      value={selectedDoctorId}
-                      onChange={(event) => setSelectedDoctorId(event.target.value)}
-                      className="input-field mt-0"
-                      aria-label="Assign doctor"
-                    >
-                      <option value="">Assign doctor</option>
-                      {doctors.map((doctor) => (
-                        <option key={doctor.id} value={doctor.id}>
-                          {doctor.displayName} - {doctor.specialty ?? doctor.department ?? 'General'}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => void assignDoctor()}
-                      disabled={!selectedDoctorId || isAssigningDoctor}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isAssigningDoctor ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Stethoscope size={15} aria-hidden="true" />}
-                      Assign
-                    </button>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                    <input
-                      type="datetime-local"
-                      value={appointmentTime}
-                      onChange={(event) => setAppointmentTime(event.target.value)}
-                      className="input-field mt-0"
-                      aria-label="Next visit date"
-                    />
-                    <input
-                      value={appointmentNote}
-                      onChange={(event) => setAppointmentNote(event.target.value)}
-                      className="input-field mt-0"
-                      placeholder="Visit note"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void saveAppointment()}
-                      disabled={!appointmentTime || isSavingAppointment}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-sky-200 bg-white px-3 text-sm font-medium text-slate-800 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isSavingAppointment ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <CalendarDays size={15} aria-hidden="true" />}
-                      Visit
-                    </button>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <WorkflowButton icon={<FileText size={15} aria-hidden="true" />} disabled={isGeneratingReport} onClick={() => void createReport()}>
-                      {isGeneratingReport ? 'Generating' : 'Report'}
-                    </WorkflowButton>
-                    <WorkflowButton icon={<Pill size={15} aria-hidden="true" />} onClick={generatePrescriptionDraft}>
-                      Prescription
-                    </WorkflowButton>
-                    <WorkflowButton icon={<PlayCircle size={15} aria-hidden="true" />} onClick={() => void onStatusChange(intake, 'IN_TREATMENT')}>
-                      Treat
-                    </WorkflowButton>
-                  </div>
-
-                  {isGeneratingReport ? (
-                    <div className="rounded-md border border-emerald-200 bg-white p-4">
-                      <div className="flex items-center gap-3">
-                        <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
-                          <span className="absolute h-2 w-2 rounded-full bg-emerald-600 animate-orbit" />
-                          <FileText size={20} className="text-emerald-700" aria-hidden="true" />
-                        </span>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-950">Savi is writing the patient report</p>
-                          <p className="text-xs text-slate-500">Using intake, assessment, and queue context.</p>
-                        </div>
+                {/* Presentation */}
+                <InfoCard icon={<ClipboardList size={15} aria-hidden="true" />} tint="bg-sky-100 text-sky-700" title="Presentation">
+                  <p className="text-sm font-semibold leading-6 text-slate-950">{intake.chiefComplaint}</p>
+                  <DistressMeter level={intake.painLevel} />
+                  {intake.structuredSymptoms.length > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Symptoms</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {intake.structuredSymptoms.map((symptom) => (
+                          <span key={symptom} className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 ring-1 ring-inset ring-sky-200">
+                            {symptom}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   ) : null}
-
-                  {patientReport ? (
-                    <ReportPreview report={patientReport.report} aiBacked={patientReport.aiBacked} />
+                  {activeRiskFlags(intake).length > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Risk flags</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {activeRiskFlags(intake).map((flag) => (
+                          <span key={flag} className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-800 ring-1 ring-inset ring-rose-200">
+                            <ShieldAlert size={11} aria-hidden="true" />
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
-
-                  {prescriptionDraft ? (
-                    <textarea
-                      value={prescriptionDraft}
-                      onChange={(event) => setPrescriptionDraft(event.target.value)}
-                      className="input-field h-36 resize-y py-2"
-                      aria-label="Prescription draft"
-                    />
+                  {intake.symptomNotes ? (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Intake notes</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words rounded-md bg-slate-50 p-2.5 text-xs leading-5 text-slate-700">
+                        {intake.symptomNotes}
+                      </p>
+                    </div>
                   ) : null}
-                </div>
-              </DetailSection>
+                </InfoCard>
 
-              <DetailSection title="Care thread">
+                {/* Savi AI assessment */}
+                <InfoCard icon={<BrainCircuit size={15} aria-hidden="true" />} tint="bg-violet-100 text-violet-700" title="Savi AI assessment">
+                  {intake.assessment ? (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ring-inset ${urgencyStyles[intake.assessment.finalCategory]}`}>
+                          {formatEnumLabel(intake.assessment.finalCategory)} · {intake.assessment.finalScore}/100
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                          Confidence {formatEnumLabel(intake.assessment.confidenceLevel)}
+                        </span>
+                      </div>
+                      {intake.assessment.suggestedDiagnosis ? (
+                        <div className="rounded-md border border-violet-100 bg-violet-50/70 p-3">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700">Suggested diagnosis</p>
+                          <p className="mt-1 text-sm font-medium leading-6 text-slate-900">{intake.assessment.suggestedDiagnosis}</p>
+                        </div>
+                      ) : null}
+                      {intake.assessment.medicalAttentionNote ? (
+                        <div className="rounded-md border border-amber-100 bg-amber-50/70 p-3">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">Attention needed</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-800">{intake.assessment.medicalAttentionNote}</p>
+                        </div>
+                      ) : null}
+                      {intake.assessment.redFlagIndicators.length > 0 ? (
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Red flags</p>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {intake.assessment.redFlagIndicators.map((flag) => (
+                              <span key={flag} className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-semibold text-rose-900 ring-1 ring-inset ring-rose-200">
+                                <BadgeAlert size={11} aria-hidden="true" />
+                                {flag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {intake.assessment.structuredSymptomSummary ? (
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">What the AI understood</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-700">{intake.assessment.structuredSymptomSummary}</p>
+                        </div>
+                      ) : null}
+                      {intake.assessment.scoreFactors.length > 0 ? (
+                        <div className="rounded-md bg-slate-50 p-3">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">How the score was set</p>
+                          <ul className="mt-1.5 space-y-1 text-xs leading-5 text-slate-600">
+                            {intake.assessment.scoreFactors.map((factor, index) => (
+                              <li key={index} className="flex gap-2">
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" aria-hidden="true" />
+                                <span className="min-w-0">{factor}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {intake.assessment.staffFacingExplanation ? (
+                        <p className="border-t border-slate-100 pt-2.5 text-xs italic leading-5 text-slate-500">
+                          {intake.assessment.staffFacingExplanation}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">No triage assessment recorded.</p>
+                  )}
+                </InfoCard>
+
+              <InfoCard icon={<UsersRound size={15} aria-hidden="true" />} tint="bg-emerald-100 text-emerald-700" title="Care thread">
                 <div className="space-y-3">
                   {threadError ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-800">{threadError}</p> : null}
                   {isThreadLoading ? (
@@ -1607,21 +1646,438 @@ function IntakeDetailDialog({
                     </button>
                   </div>
                 </div>
-              </DetailSection>
+              </InfoCard>
+              </div>
             </div>
           ) : null}
+        </div>
+      </div>
+
+      {intake && isScheduleOpen ? (
+        <ScheduleVisitModal
+          patientDisplayId={intake.patientDisplayId}
+          appointmentTime={appointmentTime}
+          appointmentNote={appointmentNote}
+          isSaving={isSavingAppointment}
+          onTimeChange={setAppointmentTime}
+          onNoteChange={setAppointmentNote}
+          onSave={() => void saveAppointment()}
+          onClose={() => setIsScheduleOpen(false)}
+        />
+      ) : null}
+
+      {intake && (isGeneratingReport || patientReport) ? (
+        <DocumentModal
+          title={`Patient report - ${intake.patientDisplayId}`}
+          badge={patientReport ? (patientReport.aiBacked ? 'LLM generated' : 'Fallback') : 'Generating'}
+          isGenerating={isGeneratingReport}
+          generatingLabel="Savi is writing the patient report"
+          generatingHint="Compiling intake, triage assessment, research, and queue context..."
+          body={patientReport?.report ?? ''}
+          fileName={`${intake.patientDisplayId}-report.pdf`}
+          onClose={() => setPatientReport(null)}
+        />
+      ) : null}
+
+      {intake && prescriptionDraft ? (
+        <DocumentModal
+          title={`Prescription draft - ${intake.patientDisplayId}`}
+          badge="Draft - clinician to complete"
+          isGenerating={false}
+          generatingLabel=""
+          generatingHint=""
+          body={prescriptionDraft}
+          editable
+          onBodyChange={setPrescriptionDraft}
+          fileName={`${intake.patientDisplayId}-prescription.pdf`}
+          onClose={() => setPrescriptionDraft('')}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function InfoCard({ icon, tint, title, children }: { icon: ReactNode; tint: string; title: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className={`flex h-7 w-7 items-center justify-center rounded-md ${tint}`}>{icon}</span>
+        <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
+      </div>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+type VitalStatus = 'ok' | 'warn' | 'alert' | 'missing';
+
+const vitalStatusStyles: Record<VitalStatus, { dot: string; badge: string; label: string }> = {
+  ok: { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-800 ring-emerald-200', label: 'Normal' },
+  warn: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-800 ring-amber-200', label: 'Watch' },
+  alert: { dot: 'bg-rose-500', badge: 'bg-rose-50 text-rose-800 ring-rose-200', label: 'Abnormal' },
+  missing: { dot: 'bg-slate-300', badge: 'bg-slate-50 text-slate-500 ring-slate-200', label: 'Not taken' },
+};
+
+function rangeStatus(value: number | undefined, ok: [number, number], warn: [number, number]): VitalStatus {
+  if (value == null) {
+    return 'missing';
+  }
+  if (value >= ok[0] && value <= ok[1]) {
+    return 'ok';
+  }
+  if (value >= warn[0] && value <= warn[1]) {
+    return 'warn';
+  }
+  return 'alert';
+}
+
+function VitalsTable({ vitals }: { vitals: IntakeResponse['vitals'] }) {
+  const bpStatus: VitalStatus = vitals.systolicPressure == null
+    ? 'missing'
+    : rangeStatus(vitals.systolicPressure, [90, 139], [80, 179]);
+
+  const rows: Array<{ icon: ReactNode; label: string; value: string; unit: string; status: VitalStatus }> = [
+    {
+      icon: <Thermometer size={15} aria-hidden="true" />,
+      label: 'Temperature',
+      value: vitals.temperatureC != null ? vitals.temperatureC.toFixed(1) : '—',
+      unit: '°C',
+      status: rangeStatus(vitals.temperatureC, [36.1, 37.9], [35, 38.9]),
+    },
+    {
+      icon: <HeartPulse size={15} aria-hidden="true" />,
+      label: 'Heart rate',
+      value: vitals.heartRate != null ? String(vitals.heartRate) : '—',
+      unit: 'bpm',
+      status: rangeStatus(vitals.heartRate, [60, 100], [50, 120]),
+    },
+    {
+      icon: <Gauge size={15} aria-hidden="true" />,
+      label: 'Blood pressure',
+      value: vitals.systolicPressure != null || vitals.diastolicPressure != null
+        ? `${vitals.systolicPressure ?? '—'}/${vitals.diastolicPressure ?? '—'}`
+        : '—',
+      unit: 'mmHg',
+      status: bpStatus,
+    },
+    {
+      icon: <Wind size={15} aria-hidden="true" />,
+      label: 'Respiratory rate',
+      value: vitals.respiratoryRate != null ? String(vitals.respiratoryRate) : '—',
+      unit: '/min',
+      status: rangeStatus(vitals.respiratoryRate, [12, 20], [10, 24]),
+    },
+    {
+      icon: <Droplets size={15} aria-hidden="true" />,
+      label: 'SpO₂',
+      value: vitals.oxygenSaturation != null ? String(vitals.oxygenSaturation) : '—',
+      unit: '%',
+      status: vitals.oxygenSaturation == null ? 'missing' : vitals.oxygenSaturation >= 95 ? 'ok' : vitals.oxygenSaturation >= 90 ? 'warn' : 'alert',
+    },
+  ];
+
+  return (
+    <table className="w-full border-separate border-spacing-0 text-sm">
+      <tbody>
+        {rows.map((row, index) => {
+          const style = vitalStatusStyles[row.status];
+          return (
+            <tr key={row.label}>
+              <td className={`flex items-center gap-2.5 py-2.5 pr-2 ${index > 0 ? 'border-t border-slate-100' : ''}`}>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600">
+                  {row.icon}
+                </span>
+                <span className="font-medium text-slate-700">{row.label}</span>
+              </td>
+              <td className={`py-2.5 pr-2 text-right ${index > 0 ? 'border-t border-slate-100' : ''}`}>
+                <span className={`font-semibold ${row.status === 'missing' ? 'text-slate-400' : 'text-slate-950'}`}>{row.value}</span>
+                <span className="ml-1 text-xs text-slate-400">{row.unit}</span>
+              </td>
+              <td className={`w-24 py-2.5 text-right ${index > 0 ? 'border-t border-slate-100' : ''}`}>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ${style.badge}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
+                  {style.label}
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function DistressMeter({ level }: { level: number }) {
+  const tone = level >= 7 ? 'bg-rose-500' : level >= 4 ? 'bg-amber-500' : 'bg-emerald-500';
+  const toneText = level >= 7 ? 'text-rose-700' : level >= 4 ? 'text-amber-700' : 'text-emerald-700';
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Clinical distress</p>
+        <p className={`text-xs font-bold ${toneText}`}>{level}/10</p>
+      </div>
+      <div className="mt-1.5 h-2 rounded-full bg-slate-100">
+        <div className={`h-2 rounded-full ${tone} transition-all duration-500`} style={{ width: `${Math.min(100, level * 10)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ScheduleVisitModal({
+  patientDisplayId,
+  appointmentTime,
+  appointmentNote,
+  isSaving,
+  onTimeChange,
+  onNoteChange,
+  onSave,
+  onClose,
+}: {
+  patientDisplayId: string;
+  appointmentTime: string;
+  appointmentNote: string;
+  isSaving: boolean;
+  onTimeChange: (value: string) => void;
+  onNoteChange: (value: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="animate-message-in w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+              <CalendarPlus size={17} aria-hidden="true" />
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">Schedule next visit</h3>
+              <p className="text-xs text-slate-500">Follow-up for {patientDisplayId}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
+            aria-label="Close scheduling"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+
+        <label className="mt-4 block text-sm font-medium text-slate-700">
+          Visit date & time
+          <input
+            type="datetime-local"
+            value={appointmentTime}
+            onChange={(event) => onTimeChange(event.target.value)}
+            className="input-field"
+          />
+        </label>
+        <label className="mt-3 block text-sm font-medium text-slate-700">
+          Visit note
+          <input
+            value={appointmentNote}
+            onChange={(event) => onNoteChange(event.target.value)}
+            className="input-field"
+            placeholder="e.g. Wound check, review labs"
+          />
+        </label>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 items-center rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!appointmentTime || isSaving}
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <CalendarDays size={15} aria-hidden="true" />}
+            Save visit
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+function downloadPdf(title: string, body: string, fileName: string) {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const margin = 48;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const usableWidth = pageWidth - margin * 2;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.text('CareFlow AI', margin, 52);
+  doc.setFontSize(12);
+  doc.text(title, margin, 74);
+  doc.setDrawColor(180);
+  doc.line(margin, 84, pageWidth - margin, 84);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10.5);
+  let y = 106;
+  for (const rawLine of body.split('\n')) {
+    const heading = rawLine.startsWith('#');
+    const text = heading ? rawLine.replace(/^#+\s*/, '') : rawLine;
+    doc.setFont('helvetica', heading ? 'bold' : 'normal');
+    const wrapped: string[] = doc.splitTextToSize(text || ' ', usableWidth);
+    for (const line of wrapped) {
+      if (y > pageHeight - 56) {
+        doc.addPage();
+        y = 56;
+      }
+      doc.text(line, margin, y);
+      y += 15;
+    }
+  }
+  doc.save(fileName);
+}
+
+function DocumentModal({
+  title,
+  badge,
+  isGenerating,
+  generatingLabel,
+  generatingHint,
+  body,
+  fileName,
+  editable = false,
+  onBodyChange,
+  onClose,
+}: {
+  title: string;
+  badge: string;
+  isGenerating: boolean;
+  generatingLabel: string;
+  generatingHint: string;
+  body: string;
+  fileName: string;
+  editable?: boolean;
+  onBodyChange?: (value: string) => void;
+  onClose: () => void;
+}) {
   return (
-    <section className="min-w-0 rounded-lg border border-sky-100 bg-sky-50 p-4">
-      <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
-      <div className="mt-3">{children}</div>
-    </section>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur"
+      role="dialog"
+      aria-modal="true"
+      onClick={isGenerating ? undefined : onClose}
+    >
+      <div
+        className="animate-message-in flex max-h-[90vh] w-full max-w-2xl flex-col"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 rounded-t-xl border border-b-0 border-slate-200 bg-white px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileText size={16} className="shrink-0 text-emerald-700" aria-hidden="true" />
+            <p className="truncate text-sm font-semibold text-slate-950">{title}</p>
+            <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200">
+              {badge}
+            </span>
+          </div>
+          {!isGenerating ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
+              aria-label="Close document"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+
+        {/* The "PDF page" */}
+        <div className="relative min-h-0 flex-1 overflow-y-auto border border-slate-200 bg-slate-100 p-4 sm:p-6">
+          <div className={`mx-auto min-h-[28rem] w-full max-w-xl rounded-sm bg-white p-8 shadow-xl ring-1 ring-slate-200 ${isGenerating ? 'select-none blur-[3px]' : ''}`}>
+            {isGenerating ? (
+              <div className="animate-pulse space-y-3">
+                <div className="h-5 w-1/3 rounded bg-slate-200" />
+                <div className="h-3 w-2/3 rounded bg-slate-100" />
+                <div className="mt-6 h-3 w-full rounded bg-slate-100" />
+                <div className="h-3 w-full rounded bg-slate-100" />
+                <div className="h-3 w-5/6 rounded bg-slate-100" />
+                <div className="mt-5 h-4 w-1/4 rounded bg-slate-200" />
+                <div className="h-3 w-full rounded bg-slate-100" />
+                <div className="h-3 w-4/5 rounded bg-slate-100" />
+                <div className="h-3 w-full rounded bg-slate-100" />
+                <div className="mt-5 h-4 w-1/3 rounded bg-slate-200" />
+                <div className="h-3 w-3/4 rounded bg-slate-100" />
+                <div className="h-3 w-full rounded bg-slate-100" />
+              </div>
+            ) : editable ? (
+              <textarea
+                value={body}
+                onChange={(event) => onBodyChange?.(event.target.value)}
+                className="h-96 w-full resize-y bg-transparent font-mono text-sm leading-6 text-slate-800 outline-none"
+                aria-label="Document body"
+              />
+            ) : (
+              <div className="space-y-2 text-sm leading-6 text-slate-800">
+                {body.split('\n').filter(Boolean).map((line, index) => {
+                  const heading = line.startsWith('#') ? line.replace(/^#+\s*/, '') : null;
+                  return heading ? (
+                    <p key={`${line}-${index}`} className="pt-2 text-base font-bold text-slate-950">{heading}</p>
+                  ) : (
+                    <p key={`${line}-${index}`} className="whitespace-pre-wrap break-words">{line}</p>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {isGenerating ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-lg ring-1 ring-slate-200">
+                <span className="absolute h-2 w-2 rounded-full bg-emerald-600 animate-orbit" />
+                <FileText size={22} className="text-emerald-700" aria-hidden="true" />
+              </span>
+              <div className="rounded-full bg-white/95 px-4 py-2 text-center shadow-lg ring-1 ring-slate-200">
+                <p className="text-sm font-semibold text-slate-950">{generatingLabel}</p>
+                <p className="text-xs text-slate-500">{generatingHint}</p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 rounded-b-xl border border-t-0 border-slate-200 bg-white px-4 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isGenerating}
+            className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadPdf(title, body, fileName)}
+            disabled={isGenerating || !body.trim()}
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download size={15} aria-hidden="true" />
+            Download PDF
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1649,42 +2105,3 @@ function WorkflowButton({
   );
 }
 
-function ReportPreview({ report, aiBacked }: { report: string; aiBacked: boolean }) {
-  return (
-    <div className="rounded-md border border-emerald-100 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-950">Generated report</p>
-        <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
-          {aiBacked ? 'LLM' : 'Fallback'}
-        </span>
-      </div>
-      <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-        {report.split('\n').filter(Boolean).map((line, index) => {
-          const heading = line.startsWith('#') ? line.replace(/^#+\s*/, '') : null;
-          return heading ? (
-            <p key={`${line}-${index}`} className="font-semibold text-slate-950">
-              {heading}
-            </p>
-          ) : (
-            <p key={`${line}-${index}`} className="whitespace-pre-wrap break-words">
-              {line}
-            </p>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function DetailGrid({ items }: { items: Array<[string, string | number]> }) {
-  return (
-    <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
-      {items.map(([label, value]) => (
-        <div key={label} className="min-w-0 rounded-md bg-white p-3">
-          <dt className="text-xs font-semibold uppercase tracking-normal text-slate-500">{label}</dt>
-          <dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}

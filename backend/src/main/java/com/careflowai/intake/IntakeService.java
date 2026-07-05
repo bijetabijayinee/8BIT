@@ -79,6 +79,10 @@ public class IntakeService {
 
         StaffUser actor = staffUserService.resolveActor(request.staffName(), null, request.department());
         Patient patient = patientRepository.save(new Patient(patientDisplayId, request.ageBand()));
+        String contactMetadata = contactMetadata(request);
+        if (contactMetadata != null) {
+            patient.updateContactMetadata(contactMetadata);
+        }
         Intake intake = intakeRepository.save(toIntake(patient, request, actor));
         workflowStream.publish(patientDisplayId, "INTAKE_SAVED", "Intake workspace", "Saved to database",
             "Patient record and intake stored in Postgres (department %s).".formatted(intake.getDepartment()));
@@ -146,6 +150,20 @@ public class IntakeService {
             request.currentStatus() == null ? QueueStatus.WAITING : request.currentStatus(),
             staffAttribution(actor)
         );
+    }
+
+    private String contactMetadata(CreateIntakeRequest request) {
+        List<String> parts = new java.util.ArrayList<>();
+        if (request.patientName() != null && !request.patientName().isBlank()) {
+            parts.add("Name: " + request.patientName().trim());
+        }
+        if (request.gender() != null && !request.gender().isBlank()) {
+            parts.add("Gender: " + request.gender().trim());
+        }
+        if (request.contactPhone() != null && !request.contactPhone().isBlank()) {
+            parts.add("Phone: " + request.contactPhone().trim());
+        }
+        return parts.isEmpty() ? null : String.join(" | ", parts);
     }
 
     private String resolvePatientDisplayId(String requestedDisplayId) {

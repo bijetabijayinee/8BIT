@@ -141,6 +141,15 @@ AI_SERVICE_URL=
 # Production only: comma-separated origins allowed to call the API cross-origin
 # (leave empty in dev — Vite proxies /api same-origin)
 CORS_ALLOWED_ORIGINS=
+
+# Auth: HMAC secret for JWT signing (>= 32 chars; REQUIRED in production),
+# token lifetime, and the default password backfilled for seeded staff
+JWT_SECRET=change-me-to-a-long-random-string
+JWT_TTL_MINUTES=720
+DEFAULT_STAFF_PASSWORD=careflow
+
+# Optional: NCBI E-utilities key (raises PubMed rate limit for the research agent)
+NCBI_API_KEY=
 ```
 
 ### 2. Run the backend
@@ -178,14 +187,17 @@ Then set `AI_SERVICE_URL=http://127.0.0.1:8090` in the root `.env`.
 
 ### 5. Log in and try it
 
-Use a demo staff code in the workspace sidebar, then submit an intake and watch the agents
-work in the live workflow stream:
+Each staff member signs in individually with their staff code and password (JWT-backed
+sessions; the seeded directory uses the default password `careflow`). Then submit an intake
+and watch the agents work in the live workflow stream:
 
 | Staff code | Role |
 | --- | --- |
 | `INTAKE-01` | Intake staff |
 | `TRIAGE-01` | Triage nurse |
 | `CHARGE-01` | Charge nurse |
+| `DOCTOR-EM` | Doctor, Emergency Medicine (sees the live queue too) |
+| `DOCTOR-CARD` / `DOCTOR-PEDS` / `DOCTOR-ORTHO` / `DOCTOR-PULM` | Specialty doctors |
 
 ### Build & test
 

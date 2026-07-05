@@ -28,7 +28,14 @@ import type {
   UpdateQueueStatusRequest,
 } from '../types/careflow';
 
+import { getToken, handleSessionExpired } from './auth';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 interface ApiRequestOptions extends RequestInit {
   timeoutMs?: number;
@@ -81,11 +88,16 @@ export async function apiRequest<TResponse>(path: string, init?: ApiRequestOptio
     const response = await fetch(`${API_BASE_URL}${path}`, {
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
         ...requestInit.headers,
       },
       ...requestInit,
       signal: controller?.signal ?? requestInit.signal,
     });
+
+    if (response.status === 401 && getToken()) {
+      handleSessionExpired();
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
@@ -363,8 +375,13 @@ export async function uploadKnowledgeDocument(file: File, title?: string) {
 
   const response = await fetch(`${API_BASE_URL}/api/knowledge`, {
     method: 'POST',
+    headers: authHeaders(),
     body: formData,
   });
+
+  if (response.status === 401 && getToken()) {
+    handleSessionExpired();
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');

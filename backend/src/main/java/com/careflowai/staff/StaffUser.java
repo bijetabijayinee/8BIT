@@ -36,6 +36,8 @@ public class StaffUser {
     @Column(nullable = false)
     private boolean active = true;
 
+    private String passwordHash;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -94,6 +96,14 @@ public class StaffUser {
 
     public boolean isActive() {
         return active;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public Instant getCreatedAt() {

@@ -28,7 +28,9 @@ import org.springframework.web.client.RestClient;
  * doctor assignment, so its findings feed the later stages:
  *   1. builds candidate search queries from the triage LLM's suggested diagnosis,
  *      the chief complaint, and the structured symptoms,
- *   2. calls its online tool (Wikipedia REST API) trying each query until articles are found,
+ *   2. calls its live online tools - PubMed (NCBI E-utilities) and Europe PMC for
+ *      peer-reviewed literature, with Wikipedia's medical reference as a fallback -
+ *      trying each query until articles are found,
  *   3. asks the LLM to reason over the articles against the patient's presentation,
  *   4. saves the briefing + citation links to the patient thread and timeline,
  *   5. returns the briefing so the Assignment Agent can use it when choosing a doctor.
@@ -39,7 +41,8 @@ public class MedicalResearchAgent {
     private static final Logger log = LoggerFactory.getLogger(MedicalResearchAgent.class);
     private static final String AGENT_NAME = "Medical Research Agent";
     private static final String AGENT_CODE = "RESEARCH_AGENT";
-    private static final int MAX_ARTICLES = 3;
+    private static final int MAX_ARTICLES_PER_SOURCE = 3;
+    private static final int MAX_ARTICLES_TOTAL = 5;
     private static final Set<String> QUALIFIER_WORDS = Set.of(
         "possible", "suspected", "likely", "probable", "acute", "rule", "out", "r/o", "vs", "versus");
 
@@ -61,12 +64,16 @@ public class MedicalResearchAgent {
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
+    private final String ncbiApiKey;
+
     public MedicalResearchAgent(PatientTimelineEventRepository timelineRepository,
                                 PatientThreadCommentRepository threadCommentRepository,
                                 SystemAgentService systemAgentService,
                                 WorkflowStreamService workflowStream,
                                 SpringAiChatService springAiChatService,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                @org.springframework.beans.factory.annotation.Value("${research.ncbi-api-key:}") String ncbiApiKey) {
+        this.ncbiApiKey = ncbiApiKey;
         this.timelineRepository = timelineRepository;
         this.threadCommentRepository = threadCommentRepository;
         this.systemAgentService = systemAgentService;
@@ -187,7 +194,8 @@ public class MedicalResearchAgent {
         reasoning.append("- Basis: ").append(StringUtils.hasText(suggestedDiagnosis)
             ? "triage LLM's suggested concern \"" + suggestedDiagnosis + "\""
             : "the recorded complaint and symptoms").append("\n");
-        reasoning.append("- Tool: Wikipedia medical reference REST API (live internet search)\n");
+        reasoning.append("- Tools: PubMed (NCBI E-utilities) and Europe PMC for peer-reviewed literature, "
+            + "Wikipedia medical reference as fallback (live internet search)\n");
         reasoning.append("- Query plan (tried in order until articles are found):\n");
         queries.forEach(query -> reasoning.append("  - \"").append(query).append("\"\n"));
         reasoning.append("- Its findings are saved to the record and handed to the Priority and Assignment agents.");
@@ -196,7 +204,7 @@ public class MedicalResearchAgent {
 
     private String articlesReasoning(String usedQuery, List<Article> articles) {
         StringBuilder reasoning = new StringBuilder("Query \"" + usedQuery + "\" returned these reference articles:\n");
-        articles.forEach(article -> reasoning.append("- ").append(article.title())
+        articles.forEach(article -> reasoning.append("- [").append(article.source()).append("] ").append(article.title())
             .append(" - ").append(shorten(article.summary(), 180))
             .append(" ").append(article.url()).append("\n"));
         reasoning.append("The agent now reasons over these against the patient's presentation.");
@@ -211,32 +219,139 @@ public class MedicalResearchAgent {
         return reasoning.toString();
     }
 
+    /**
+     * Aggregates live results across sources in credibility order: peer-reviewed
+     * literature first (PubMed, Europe PMC), general medical reference last.
+     * Each source failing is logged and skipped so one outage never kills research.
+     */
     private List<Article> searchArticles(String query) {
-        String url = "https://en.wikipedia.org/w/rest.php/v1/search/page?q=%s&limit=%d"
-            .formatted(URLEncoder.encode(query, StandardCharsets.UTF_8), MAX_ARTICLES);
-        String body = restClient.get().uri(url).retrieve().body(String.class);
         List<Article> articles = new ArrayList<>();
+        collectSource(articles, "PubMed", () -> searchPubMed(query));
+        if (articles.size() < MAX_ARTICLES_TOTAL) {
+            collectSource(articles, "Europe PMC", () -> searchEuropePmc(query));
+        }
+        if (articles.isEmpty()) {
+            collectSource(articles, "Wikipedia", () -> searchWikipedia(query));
+        }
+        return articles.size() <= MAX_ARTICLES_TOTAL ? articles : articles.subList(0, MAX_ARTICLES_TOTAL);
+    }
+
+    @FunctionalInterface
+    private interface ArticleSearch {
+        List<Article> run() throws Exception;
+    }
+
+    private void collectSource(List<Article> into, String sourceName, ArticleSearch search) {
         try {
-            JsonNode pages = objectMapper.readTree(body).path("pages");
-            for (JsonNode page : pages) {
-                String key = page.path("key").asText("");
-                String title = page.path("title").asText("");
-                if (key.isBlank() || title.isBlank()) {
-                    continue;
-                }
-                String summary = fetchSummary(key);
-                if (!StringUtils.hasText(summary)) {
-                    summary = page.path("description").asText("No summary available.");
-                }
-                articles.add(new Article(title, "https://en.wikipedia.org/wiki/" + key, summary));
+            into.addAll(search.run());
+        } catch (Exception sourceFailure) {
+            log.warn("{} search failed: {}", sourceName, sourceFailure.getMessage());
+        }
+    }
+
+    /** PubMed via NCBI E-utilities: esearch for PMIDs, esummary for titles, efetch for abstracts. */
+    private List<Article> searchPubMed(String query) throws Exception {
+        String keyParam = StringUtils.hasText(ncbiApiKey) ? "&api_key=" + ncbiApiKey : "";
+        String searchUrl = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            + "?db=pubmed&retmode=json&sort=relevance&retmax=%d&term=%s%s")
+            .formatted(MAX_ARTICLES_PER_SOURCE, URLEncoder.encode(query, StandardCharsets.UTF_8), keyParam);
+        JsonNode idList = objectMapper.readTree(restClient.get().uri(searchUrl).retrieve().body(String.class))
+            .path("esearchresult").path("idlist");
+        List<String> pmids = new ArrayList<>();
+        idList.forEach(id -> pmids.add(id.asText()));
+        if (pmids.isEmpty()) {
+            return List.of();
+        }
+
+        String joinedIds = String.join(",", pmids);
+        String summaryUrl = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=%s%s"
+            .formatted(joinedIds, keyParam);
+        JsonNode summaryResult = objectMapper.readTree(restClient.get().uri(summaryUrl).retrieve().body(String.class))
+            .path("result");
+
+        List<Article> articles = new ArrayList<>();
+        for (String pmid : pmids) {
+            JsonNode entry = summaryResult.path(pmid);
+            String title = entry.path("title").asText("");
+            if (title.isBlank()) {
+                continue;
             }
-        } catch (Exception parseFailure) {
-            log.warn("Could not parse article search response for '{}': {}", query, parseFailure.getMessage());
+            String journal = entry.path("fulljournalname").asText("");
+            String pubDate = entry.path("pubdate").asText("");
+            String abstractText = fetchPubMedAbstract(pmid, keyParam);
+            String summary = StringUtils.hasText(abstractText)
+                ? abstractText
+                : "%s (%s).".formatted(journal.isBlank() ? "PubMed-indexed article" : journal, pubDate);
+            articles.add(new Article(title, "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/", summary, "PubMed"));
         }
         return articles;
     }
 
-    private String fetchSummary(String pageKey) {
+    private String fetchPubMedAbstract(String pmid, String keyParam) {
+        try {
+            String url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&rettype=abstract&retmode=text&id=%s%s"
+                .formatted(pmid, keyParam);
+            String text = restClient.get().uri(url).retrieve().body(String.class);
+            return text == null ? "" : shorten(text, 700);
+        } catch (Exception abstractFailure) {
+            return "";
+        }
+    }
+
+    /** Europe PMC REST search: peer-reviewed literature plus preprints, JSON with abstracts. */
+    private List<Article> searchEuropePmc(String query) throws Exception {
+        String url = ("https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+            + "?format=json&pageSize=%d&resultType=core&query=%s")
+            .formatted(MAX_ARTICLES_PER_SOURCE, URLEncoder.encode(query, StandardCharsets.UTF_8));
+        JsonNode results = objectMapper.readTree(restClient.get().uri(url).retrieve().body(String.class))
+            .path("resultList").path("result");
+        List<Article> articles = new ArrayList<>();
+        for (JsonNode result : results) {
+            String title = result.path("title").asText("");
+            String source = result.path("source").asText("");
+            String id = result.path("id").asText("");
+            if (title.isBlank() || source.isBlank() || id.isBlank()) {
+                continue;
+            }
+            String summary = result.path("abstractText").asText("");
+            if (!StringUtils.hasText(summary)) {
+                summary = "%s (%s).".formatted(
+                    result.path("journalInfo").path("journal").path("title").asText("Europe PMC-indexed article"),
+                    result.path("pubYear").asText(""));
+            }
+            articles.add(new Article(
+                title,
+                "https://europepmc.org/article/%s/%s".formatted(source, id),
+                shorten(summary, 700),
+                "Europe PMC"
+            ));
+        }
+        return articles;
+    }
+
+    /** General medical reference fallback when no literature matched the query. */
+    private List<Article> searchWikipedia(String query) throws Exception {
+        String url = "https://en.wikipedia.org/w/rest.php/v1/search/page?q=%s&limit=%d"
+            .formatted(URLEncoder.encode(query, StandardCharsets.UTF_8), MAX_ARTICLES_PER_SOURCE);
+        String body = restClient.get().uri(url).retrieve().body(String.class);
+        List<Article> articles = new ArrayList<>();
+        JsonNode pages = objectMapper.readTree(body).path("pages");
+        for (JsonNode page : pages) {
+            String key = page.path("key").asText("");
+            String title = page.path("title").asText("");
+            if (key.isBlank() || title.isBlank()) {
+                continue;
+            }
+            String summary = fetchWikipediaSummary(key);
+            if (!StringUtils.hasText(summary)) {
+                summary = page.path("description").asText("No summary available.");
+            }
+            articles.add(new Article(title, "https://en.wikipedia.org/wiki/" + key, summary, "Wikipedia"));
+        }
+        return articles;
+    }
+
+    private String fetchWikipediaSummary(String pageKey) {
         try {
             String body = restClient.get()
                 .uri("https://en.wikipedia.org/api/rest_v1/page/summary/" + pageKey)
@@ -259,7 +374,8 @@ public class MedicalResearchAgent {
                 userInput.append(" | triage concern: ").append(suggestedDiagnosis);
             }
             userInput.append("\n\nReference article excerpts:\n");
-            articles.forEach(article -> userInput.append("- ").append(article.title()).append(": ")
+            articles.forEach(article -> userInput.append("- [").append(article.source()).append("] ")
+                .append(article.title()).append(": ")
                 .append(shorten(article.summary(), 500)).append("\n"));
             String summary = springAiChatService.respond(SUMMARY_INSTRUCTION, userInput.toString());
             if (StringUtils.hasText(summary)) {
@@ -280,7 +396,8 @@ public class MedicalResearchAgent {
             .append(" (automated online research):\n\n")
             .append(briefing)
             .append("\n\nSources:");
-        articles.forEach(article -> note.append("\n- ").append(article.title()).append(" (").append(article.url()).append(")"));
+        articles.forEach(article -> note.append("\n- [").append(article.source()).append("] ")
+            .append(article.title()).append(" (").append(article.url()).append(")"));
 
         PatientThreadComment comment = new PatientThreadComment(patient, intake, AGENT_NAME, note.toString());
         articles.forEach(article -> comment.addAttachment(new PatientThreadAttachment(
@@ -310,6 +427,6 @@ public class MedicalResearchAgent {
         return compact.length() <= maxLength ? compact : compact.substring(0, maxLength - 3) + "...";
     }
 
-    private record Article(String title, String url, String summary) {
+    private record Article(String title, String url, String summary, String source) {
     }
 }

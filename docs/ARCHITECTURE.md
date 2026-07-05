@@ -109,6 +109,8 @@ Every module follows the same shape: `*Controller` (REST), `*Service` (business 
 | `OPENAI_EMBEDDING_MODEL` (default `text-embedding-3-small`) | Embedding model |
 | `AI_SERVICE_URL` (optional) | Route chat to the Python sidecar when set |
 | `CORS_ALLOWED_ORIGINS` (optional) | Comma-separated origins allowed cross-origin; empty = CORS disabled (`config/CorsConfig`) |
+| `JWT_SECRET`, `JWT_TTL_MINUTES`, `DEFAULT_STAFF_PASSWORD` | Stateless JWT auth (`auth/` package): individual staff login by staff code + bcrypt password, Spring Security filter chain, token also accepted as `?token=` for the SSE stream |
+| `NCBI_API_KEY` (optional) | Raises the PubMed rate limit for the Medical Research Agent (PubMed + Europe PMC live sources, Wikipedia fallback) |
 
 ---
 

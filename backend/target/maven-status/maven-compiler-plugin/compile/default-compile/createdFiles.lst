@@ -1,6 +1,8 @@
+com\careflowai\auth\AuthController$AuthResponse.class
 com\careflowai\queue\dto\UpdateStatusRequest.class
 com\careflowai\notification\StaffNotification.class
 com\careflowai\allocation\dto\BedAllocationResponse.class
+com\careflowai\auth\JwtService$IssuedToken.class
 com\careflowai\queue\dto\AssignedDoctorResponse.class
 com\careflowai\ai\dto\AiChatResponse.class
 com\careflowai\patient\dto\PatientDirectoryEntryResponse.class
@@ -12,6 +14,7 @@ com\careflowai\common\QueueStatus.class
 com\careflowai\metrics\QueueMetricsService.class
 com\careflowai\agent\WorkflowStreamController.class
 com\careflowai\chat\dto\HospitalChatRequest.class
+com\careflowai\auth\JwtAuthFilter.class
 com\careflowai\thread\dto\ThreadAttachmentRequest.class
 com\careflowai\patient\dto\PatientStoryResponse$Assignment.class
 com\careflowai\thread\PatientThreadController.class
@@ -20,6 +23,7 @@ com\careflowai\ai\AiDoctorAssignmentService.class
 com\careflowai\agent\MedicalResearchAgent$Article.class
 com\careflowai\agent\PatientTimelineEventRepository.class
 com\careflowai\agent\SystemAgent.class
+com\careflowai\auth\PasswordBackfillRunner.class
 com\careflowai\common\OverrideReason.class
 com\careflowai\allocation\dto\AllocationSummaryResponse.class
 com\careflowai\common\DepartmentService.class
@@ -34,6 +38,7 @@ com\careflowai\queue\dto\OverridePriorityRequest.class
 com\careflowai\ai\SaviAgentTools$1.class
 com\careflowai\allocation\HospitalAllocationService.class
 com\careflowai\agent\WorkflowStreamService.class
+com\careflowai\auth\JwtService.class
 com\careflowai\agent\AgentPerformanceService$AgentSpec.class
 com\careflowai\common\ArrivalMode.class
 com\careflowai\assessment\ScoreResult.class
@@ -41,6 +46,7 @@ com\careflowai\patient\dto\PatientStoryResponse$Research.class
 com\careflowai\intake\IntakeController.class
 com\careflowai\thread\dto\ThreadAttachmentResponse.class
 com\careflowai\ai\AiServiceClient$AiServiceChatResponse.class
+com\careflowai\agent\MedicalResearchAgent$ArticleSearch.class
 com\careflowai\patient\dto\PatientStoryResponse.class
 com\careflowai\agent\PatientFlashcardRepository.class
 com\careflowai\common\StaffRole.class
@@ -63,6 +69,7 @@ com\careflowai\chat\HospitalChatService.class
 com\careflowai\metrics\MetricsController.class
 com\careflowai\patient\PatientDirectoryController.class
 com\careflowai\vector\dto\KnowledgeDocumentResponse.class
+com\careflowai\auth\AuthController$LoginRequest.class
 com\careflowai\ai\SaviAgentTools.class
 com\careflowai\intake\dto\CreateIntakeRequest.class
 com\careflowai\intake\dto\VitalsDto.class
@@ -78,6 +85,7 @@ com\careflowai\ai\AiController.class
 com\careflowai\agent\dto\PatientFlashcardResponse.class
 com\careflowai\staff\StaffUserService.class
 com\careflowai\agent\MedicalResearchAgent.class
+com\careflowai\auth\AuthController.class
 com\careflowai\ai\AiServiceClient.class
 com\careflowai\queue\QueueEntryRepository.class
 com\careflowai\staff\dto\UpdateStaffUserRequest.class
@@ -94,6 +102,7 @@ com\careflowai\agent\CareTeamAssignmentRepository.class
 com\careflowai\queue\dto\QueueEntryResponse.class
 com\careflowai\assessment\UrgencyAssessmentRepository.class
 com\careflowai\patient\dto\PatientStoryResponse$Assessment.class
+com\careflowai\agent\dto\AgentPerformanceResponse$PipelineObservability.class
 com\careflowai\patient\dto\PatientStoryResponse$Research$Citation.class
 com\careflowai\chat\dto\HospitalChatMessageResponse.class
 com\careflowai\agent\PatientAgentService$AssignmentDecision.class
@@ -123,6 +132,7 @@ com\careflowai\common\DepartmentController.class
 com\careflowai\agent\PatientAgentService$1.class
 com\careflowai\vector\SimpleIntakeVectorStore$KnowledgeSearchResult.class
 com\careflowai\queue\QueueController.class
+com\careflowai\auth\SecurityConfig.class
 com\careflowai\queue\dto\RemoveQueueEntryRequest.class
 com\careflowai\agent\dto\SaveSystemAgentRequest.class
 com\careflowai\intake\dto\IntakeResponse.class
@@ -139,6 +149,7 @@ com\careflowai\vector\IntakeVectorDocument.class
 com\careflowai\agent\AgentPerformanceService.class
 com\careflowai\vector\SimpleIntakeVectorStore.class
 com\careflowai\staff\StaffUser.class
+com\careflowai\config\CorsConfig.class
 com\careflowai\queue\dto\AssignDoctorRequest.class
 com\careflowai\queue\dto\UpdatePlacementRequest.class
 com\careflowai\staff\StaffUser$1.class

@@ -6,7 +6,8 @@ import java.util.List;
 public record AgentPerformanceResponse(
     int patientsProcessed,
     int agentActionsTotal,
-    List<AgentPerformance> agents
+    List<AgentPerformance> agents,
+    PipelineObservability pipeline
 ) {
 
     public record AgentPerformance(
@@ -23,5 +24,17 @@ public record AgentPerformanceResponse(
     }
 
     public record TrendPoint(String label, int count) {
+    }
+
+    /** Cross-agent observability computed from timeline events and triage assessments. */
+    public record PipelineObservability(
+        Double avgIntakeToAssignSeconds,
+        Double avgIntakeToResearchSeconds,
+        int researchCoveragePercent,
+        double actionsPerPatient,
+        List<TrendPoint> hourlyActivity,
+        List<TrendPoint> urgencyMix,
+        List<TrendPoint> confidenceMix
+    ) {
     }
 }

@@ -3,10 +3,13 @@ package com.careflowai.agent;
 import com.careflowai.agent.dto.AgentPerformanceResponse;
 import com.careflowai.agent.dto.AgentPerformanceResponse.AgentPerformance;
 import com.careflowai.agent.dto.AgentPerformanceResponse.TrendPoint;
+import com.careflowai.assessment.UrgencyAssessment;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,11 +41,14 @@ public class AgentPerformanceService {
 
     private final PatientTimelineEventRepository timelineRepository;
     private final SystemAgentService systemAgentService;
+    private final com.careflowai.assessment.UrgencyAssessmentRepository assessmentRepository;
 
     public AgentPerformanceService(PatientTimelineEventRepository timelineRepository,
-                                   SystemAgentService systemAgentService) {
+                                   SystemAgentService systemAgentService,
+                                   com.careflowai.assessment.UrgencyAssessmentRepository assessmentRepository) {
         this.timelineRepository = timelineRepository;
         this.systemAgentService = systemAgentService;
+        this.assessmentRepository = assessmentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -63,7 +69,95 @@ public class AgentPerformanceService {
             .toList();
 
         int totalActions = agents.stream().mapToInt(AgentPerformance::totalActions).sum();
-        return new AgentPerformanceResponse((int) patientsProcessed, totalActions, agents);
+        return new AgentPerformanceResponse(
+            (int) patientsProcessed,
+            totalActions,
+            agents,
+            buildObservability(events, (int) patientsProcessed, totalActions, now)
+        );
+    }
+
+    /**
+     * Cross-agent pipeline analytics: latency from intake to key agent decisions,
+     * research coverage, hourly load, and the triage LLM's urgency/confidence mix.
+     */
+    private AgentPerformanceResponse.PipelineObservability buildObservability(List<PatientTimelineEvent> events,
+                                                                              int patientsProcessed,
+                                                                              int totalActions,
+                                                                              Instant now) {
+        Map<UUID, Instant> intakeAt = firstEventPerPatient(events, "INTAKE_INGESTED");
+        Map<UUID, Instant> assignedAt = firstEventPerPatient(events, "DOCTOR_ASSIGNED");
+        Map<UUID, Instant> researchedAt = firstEventPerPatient(events, "MEDICAL_RESEARCH");
+
+        Double avgIntakeToAssign = averageLatencySeconds(intakeAt, assignedAt);
+        Double avgIntakeToResearch = averageLatencySeconds(intakeAt, researchedAt);
+        int researchCoverage = intakeAt.isEmpty()
+            ? 0
+            : (int) Math.round(100.0 * researchedAt.keySet().stream().filter(intakeAt::containsKey).count()
+                / intakeAt.size());
+        double actionsPerPatient = patientsProcessed == 0
+            ? 0
+            : Math.round(10.0 * totalActions / patientsProcessed) / 10.0;
+
+        Set<String> agentEventTypes = AGENTS.stream()
+            .flatMap(spec -> spec.eventTypes().stream())
+            .collect(java.util.stream.Collectors.toSet());
+        List<PatientTimelineEvent> agentEvents = events.stream()
+            .filter(event -> agentEventTypes.contains(event.getEventType()))
+            .toList();
+
+        List<UrgencyAssessment> assessments = assessmentRepository.findTop200ByOrderByAssessedAtDesc();
+        List<TrendPoint> urgencyMix = distribution(assessments, assessment ->
+            assessment.getFinalCategory() == null ? null : assessment.getFinalCategory().name());
+        List<TrendPoint> confidenceMix = distribution(assessments, assessment ->
+            assessment.getConfidenceLevel() == null ? null : assessment.getConfidenceLevel().name());
+
+        return new AgentPerformanceResponse.PipelineObservability(
+            avgIntakeToAssign,
+            avgIntakeToResearch,
+            researchCoverage,
+            actionsPerPatient,
+            buildTrend(agentEvents, now),
+            urgencyMix,
+            confidenceMix
+        );
+    }
+
+    private Map<UUID, Instant> firstEventPerPatient(List<PatientTimelineEvent> events, String eventType) {
+        Map<UUID, Instant> result = new java.util.HashMap<>();
+        for (PatientTimelineEvent event : events) {
+            if (eventType.equals(event.getEventType())) {
+                result.merge(event.getPatient().getId(), event.getCreatedAt(),
+                    (a, b) -> a.isBefore(b) ? a : b);
+            }
+        }
+        return result;
+    }
+
+    private Double averageLatencySeconds(Map<UUID, Instant> startAt, Map<UUID, Instant> endAt) {
+        List<Long> latencies = endAt.entrySet().stream()
+            .filter(entry -> startAt.containsKey(entry.getKey()))
+            .map(entry -> Duration.between(startAt.get(entry.getKey()), entry.getValue()).getSeconds())
+            .filter(seconds -> seconds >= 0)
+            .toList();
+        if (latencies.isEmpty()) {
+            return null;
+        }
+        return latencies.stream().mapToLong(Long::longValue).average().orElse(0);
+    }
+
+    private List<TrendPoint> distribution(List<UrgencyAssessment> assessments,
+                                          java.util.function.Function<UrgencyAssessment, String> classifier) {
+        Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+        for (UrgencyAssessment assessment : assessments) {
+            String key = classifier.apply(assessment);
+            if (key != null) {
+                counts.merge(key, 1, Integer::sum);
+            }
+        }
+        return counts.entrySet().stream()
+            .map(entry -> new TrendPoint(entry.getKey(), entry.getValue()))
+            .toList();
     }
 
     private AgentPerformance toPerformance(AgentSpec spec, List<PatientTimelineEvent> events,

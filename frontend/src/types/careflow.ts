@@ -98,6 +98,9 @@ export interface IntakeResponse {
 
 export interface CreateIntakeRequest {
   patientDisplayId?: string;
+  patientName?: string;
+  gender?: string;
+  contactPhone?: string;
   ageBand: AgeBand;
   arrivalTimestamp?: string;
   arrivalMode: ArrivalMode;
@@ -352,10 +355,21 @@ export interface AgentPerformance {
   recentActivity: string[];
 }
 
+export interface PipelineObservability {
+  avgIntakeToAssignSeconds: number | null;
+  avgIntakeToResearchSeconds: number | null;
+  researchCoveragePercent: number;
+  actionsPerPatient: number;
+  hourlyActivity: AgentTrendPoint[];
+  urgencyMix: AgentTrendPoint[];
+  confidenceMix: AgentTrendPoint[];
+}
+
 export interface AgentPerformanceResponse {
   patientsProcessed: number;
   agentActionsTotal: number;
   agents: AgentPerformance[];
+  pipeline: PipelineObservability;
 }
 
 export interface HospitalChatMessage {

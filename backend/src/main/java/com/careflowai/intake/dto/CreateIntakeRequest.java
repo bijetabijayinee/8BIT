@@ -11,6 +11,9 @@ import java.util.List;
 
 public record CreateIntakeRequest(
     String patientDisplayId,
+    String patientName,
+    String gender,
+    String contactPhone,
     @NotNull AgeBand ageBand,
     Instant arrivalTimestamp,
     @NotNull ArrivalMode arrivalMode,

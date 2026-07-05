@@ -47,6 +47,11 @@ F:\projects\careflow-ai\backend\src\main\java\com\careflowai\assessment\ScoreRes
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\assessment\UrgencyAssessment.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\assessment\UrgencyAssessmentRepository.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\assessment\UrgencyScoringService.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\auth\AuthController.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\auth\JwtAuthFilter.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\auth\JwtService.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\auth\PasswordBackfillRunner.java
+F:\projects\careflow-ai\backend\src\main\java\com\careflowai\auth\SecurityConfig.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\CareflowAiApplication.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\chat\dto\HospitalChatMessageResponse.java
 F:\projects\careflow-ai\backend\src\main\java\com\careflowai\chat\dto\HospitalChatRequest.java

@@ -1,4 +1,4 @@
-import { Bot, ClipboardList, Loader2, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react';
+import { Bot, ChevronDown, ClipboardList, Loader2, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { sendAiChatMessage } from '../../api/client';
 import { FormattedMessage } from '../../components/FormattedMessage';
@@ -101,6 +101,8 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
   const [messages, setMessages] = useState<ChatMessage[]>(loadStoredMessages);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasStaffMessages = messages.some((item) => item.role === 'staff');
+  // Prompts start expanded on a fresh chat and collapse once the conversation begins.
+  const [promptsExpanded, setPromptsExpanded] = useState(() => !hasStaffMessages);
 
   useEffect(() => {
     try {
@@ -131,6 +133,7 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
     const pendingId = Date.now() + 1;
     setMessage('');
     setIsSending(true);
+    setPromptsExpanded(false);
     setMessages((current) => [
       ...current,
       { id: Date.now(), role: 'staff', text: trimmedMessage },
@@ -173,6 +176,7 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
 
   const clearChat = () => {
     setMessages([welcomeMessage]);
+    setPromptsExpanded(true);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -218,6 +222,61 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
           </header>
 
           <div ref={scrollRef} className="scrollbar-hide min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+            {/* Example prompts stay pinned above the conversation; once a chat has
+                started they collapse into a slim toggle so new messages take the space. */}
+            <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setPromptsExpanded((current) => !current)}
+                className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-normal text-slate-500 transition hover:text-slate-800"
+                aria-expanded={promptsExpanded}
+              >
+                <span className="flex items-center gap-2">
+                  <ClipboardList size={14} aria-hidden="true" />
+                  Prompt ideas
+                </span>
+                <ChevronDown
+                  size={14}
+                  aria-hidden="true"
+                  className={`transition-transform ${promptsExpanded ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {promptsExpanded ? (
+                <>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {exampleQueries.map((query) => (
+                      <button
+                        key={query}
+                        type="button"
+                        disabled={isSending}
+                        onClick={() => void sendMessage(query)}
+                        className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-xs font-medium leading-5 text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {query}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-normal text-slate-500">
+                    <Wand2 size={14} aria-hidden="true" />
+                    Or let Savi act
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {actionPrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        disabled={isSending}
+                        onClick={() => void sendMessage(prompt)}
+                        className="min-w-0 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-left text-xs font-medium leading-5 text-indigo-900 transition hover:border-indigo-300 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
             {messages.map((item) => (
               <div
                 key={item.id}
@@ -236,44 +295,6 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
                 ) : null}
               </div>
             ))}
-            {!hasStaffMessages ? (
-              <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-normal text-slate-500">
-                  <ClipboardList size={14} aria-hidden="true" />
-                  Try asking
-                </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {exampleQueries.map((query) => (
-                    <button
-                      key={query}
-                      type="button"
-                      disabled={isSending}
-                      onClick={() => void sendMessage(query)}
-                      className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-xs font-medium leading-5 text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {query}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-normal text-slate-500">
-                  <Wand2 size={14} aria-hidden="true" />
-                  Or let Savi act
-                </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {actionPrompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      disabled={isSending}
-                      onClick={() => void sendMessage(prompt)}
-                      className="min-w-0 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-left text-xs font-medium leading-5 text-indigo-900 transition hover:border-indigo-300 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
 
           <form onSubmit={handleSubmit} className="shrink-0 border-t border-sky-100 p-3">

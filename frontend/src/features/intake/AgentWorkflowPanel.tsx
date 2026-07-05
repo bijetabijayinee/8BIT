@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { getToken } from '../../api/auth';
 import { FormattedMessage } from '../../components/FormattedMessage';
 import type { WorkflowEvent } from '../../types/careflow';
 
@@ -83,7 +84,11 @@ export function AgentWorkflowPanel({ patientDisplayId, isSubmitting, onDismiss }
   useEffect(() => {
     setEvents([]);
     setExpandedStages(new Set());
-    const source = new EventSource(`${API_BASE_URL}/api/agent/workflow/stream`);
+    // EventSource cannot set headers, so the JWT rides along as a query parameter.
+    const token = getToken();
+    const source = new EventSource(
+      `${API_BASE_URL}/api/agent/workflow/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`,
+    );
     const handleWorkflow = (event: MessageEvent<string>) => {
       try {
         const parsed = JSON.parse(event.data) as WorkflowEvent;
