@@ -425,7 +425,10 @@ public class PatientAgentService {
             ? "no structured symptoms"
             : String.join(", ", intake.getStructuredSymptoms());
         String risks = riskSummary(intake);
-        String vitals = "Vitals: HR %s, BP %s/%s, RR %s, SpO2 %s, Temp %s C.".formatted(
+        String vitals = "Vitals: age %s, height %s cm, weight %s kg, HR %s, BP %s/%s, RR %s, SpO2 %s, Temp %s C.".formatted(
+            valueOrUnknown(intake.getVitals().getAge()),
+            valueOrUnknown(intake.getVitals().getHeightCm()),
+            valueOrUnknown(intake.getVitals().getWeightKg()),
             valueOrUnknown(intake.getVitals().getHeartRate()),
             valueOrUnknown(intake.getVitals().getSystolicPressure()),
             valueOrUnknown(intake.getVitals().getDiastolicPressure()),

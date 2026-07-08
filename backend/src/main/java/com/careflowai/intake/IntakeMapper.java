@@ -12,6 +12,9 @@ public class IntakeMapper {
         if (dto == null) {
             return vitals;
         }
+        vitals.setAge(dto.age());
+        vitals.setHeightCm(dto.heightCm());
+        vitals.setWeightKg(dto.weightKg());
         vitals.setTemperatureC(dto.temperatureC());
         vitals.setHeartRate(dto.heartRate());
         vitals.setSystolicPressure(dto.systolicPressure());

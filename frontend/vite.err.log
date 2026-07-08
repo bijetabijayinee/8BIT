@@ -1,0 +1,63 @@
+5:24:45 PM [vite] Internal server error: Failed to resolve import "jspdf" from "src/features/queue/QueueTable.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: C:/Users/bijeta-bijayinee/OneDrive - HCL TECHNOLOGIES LIMITED/Desktop/8BIT/frontend/src/features/queue/QueueTable.tsx:33:22
+  48 |    X
+  49 |  } from "lucide-react";
+  50 |  import { jsPDF } from "jspdf";
+     |                         ^
+  51 |  import { useCallback, useEffect, useMemo, useState } from "react";
+  52 |  import { Avatar } from "../../components/Avatar";
+      at TransformPluginContext._formatLog (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:42658:41)
+      at TransformPluginContext.error (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:42655:16)
+      at normalizeUrl (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:40634:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:40753:37
+      at async Promise.all (index 4)
+      at async TransformPluginContext.transform (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:40680:7)
+      at async EnvironmentPluginContainer.transform (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:42453:18)
+      at async loadAndTransform (file:///C:/Users/bijeta-bijayinee/OneDrive%20-%20HCL%20TECHNOLOGIES%20LIMITED/Desktop/8BIT/frontend/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:35845:27)
+5:24:45 PM [vite] (client) Pre-transform error: Failed to resolve import "jspdf" from "src/features/queue/QueueTable.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: C:/Users/bijeta-bijayinee/OneDrive - HCL TECHNOLOGIES LIMITED/Desktop/8BIT/frontend/src/features/queue/QueueTable.tsx:33:22
+  48 |    X
+  49 |  } from "lucide-react";
+  50 |  import { jsPDF } from "jspdf";
+     |                         ^
+  51 |  import { useCallback, useEffect, useMemo, useState } from "react";
+  52 |  import { Avatar } from "../../components/Avatar";
+6:00:00 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:00 PM [vite] http proxy error: /api/metrics/queue
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:00 PM [vite] http proxy error: /api/departments
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:00 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:00 PM [vite] http proxy error: /api/metrics/queue
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:01 PM [vite] http proxy error: /api/departments
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:16 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:30 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:00:46 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:01:00 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:01:16 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+6:01:30 PM [vite] http proxy error: /api/agent/performance
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)

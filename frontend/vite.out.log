@@ -35,3 +35,64 @@
 3:13:42 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
 3:13:56 PM [vite] (client) hmr update /src/features/queue/QuickQueueAccess.tsx, /src/styles/global.css
 3:14:51 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+11:29:39 AM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css, /src/features/ai-chat/AiChatPage.tsx, /src/features/people/PeopleDirectory.tsx, /src/features/ai-chat/AiAgentChat.tsx, /src/features/board/CareBoard.tsx, /src/features/metrics/MetricsDashboard.tsx, /src/features/allocation/AllocationDashboard.tsx, /src/features/intake/IntakeForm.tsx, /src/features/queue/QueueTable.tsx, /src/features/knowledge/KnowledgePage.tsx, /src/features/ai-chat/HospitalLiveChat.tsx, /src/features/agent/AgentDashboardPanel.tsx
+11:29:39 AM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+11:29:39 AM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css, /src/features/ai-chat/AiChatPage.tsx, /src/features/people/PeopleDirectory.tsx, /src/features/ai-chat/AiAgentChat.tsx, /src/features/board/CareBoard.tsx, /src/features/metrics/MetricsDashboard.tsx, /src/features/allocation/AllocationDashboard.tsx, /src/features/intake/IntakeForm.tsx, /src/features/queue/QueueTable.tsx, /src/features/knowledge/KnowledgePage.tsx, /src/features/ai-chat/HospitalLiveChat.tsx, /src/features/agent/AgentDashboardPanel.tsx
+11:29:40 AM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) hmr update /src/features/agent/AgentDashboardPanel.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) hmr update /src/features/agent/AgentDashboardPanel.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) page reload src/features/agents/SystemAgentsPanel.tsx
+11:29:40 AM [vite] (client) hmr update /src/features/ai-chat/AiAgentChat.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) page reload src/features/agents/SystemAgentsPanel.tsx
+11:29:40 AM [vite] (client) hmr update /src/features/ai-chat/AiAgentChat.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) hmr update /src/features/ai-chat/AiChatPage.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) hmr update /src/features/ai-chat/HospitalLiveChat.tsx, /src/styles/global.css
+11:29:40 AM [vite] (client) hmr update /src/features/board/CareBoard.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/knowledge/KnowledgePage.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/metrics/MetricsDashboard.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/people/PeopleDirectory.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/queue/QueueTable.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/styles/global.css
+11:29:41 AM [vite] (client) page reload src/types/careflow.ts
+11:29:41 AM [vite] (client) hmr update /src/features/ai-chat/HospitalLiveChat.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/board/CareBoard.tsx, /src/styles/global.css
+11:29:41 AM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+11:29:42 AM [vite] (client) hmr update /src/features/knowledge/KnowledgePage.tsx, /src/styles/global.css
+11:29:42 AM [vite] (client) hmr update /src/features/metrics/MetricsDashboard.tsx, /src/styles/global.css
+11:29:42 AM [vite] (client) hmr update /src/features/people/PeopleDirectory.tsx, /src/styles/global.css
+11:29:42 AM [vite] (client) hmr update /src/features/queue/QueueTable.tsx, /src/styles/global.css
+11:29:42 AM [vite] (client) hmr update /src/styles/global.css
+11:29:42 AM [vite] (client) page reload src/types/careflow.ts
+5:20:59 PM [vite] (client) hmr update /src/features/board/CareBoard.tsx, /src/styles/global.css
+5:20:59 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css, /src/features/ai-chat/AiChatPage.tsx, /src/features/people/PeopleDirectory.tsx, /src/features/ai-chat/AiAgentChat.tsx, /src/features/metrics/MetricsDashboard.tsx, /src/features/allocation/AllocationDashboard.tsx, /src/features/intake/IntakeForm.tsx, /src/features/queue/QueueTable.tsx, /src/features/knowledge/KnowledgePage.tsx, /src/features/ai-chat/HospitalLiveChat.tsx, /src/features/agent/AgentDashboardPanel.tsx
+5:21:01 PM [vite] (client) hmr update /src/features/ai-chat/AiAgentChat.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/features/knowledge/KnowledgePage.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/features/queue/QueueTable.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) page reload src/types/careflow.ts
+5:21:01 PM [vite] (client) page reload src/features/agent/index.ts
+5:21:01 PM [vite] (client) hmr update /src/features/ai-chat/AiAgentChat.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:21:01 PM [vite] (client) hmr update /src/features/queue/QueueTable.tsx, /src/styles/global.css
+5:21:01 PM [vite] vite.config.js changed, restarting server...
+5:21:01 PM [vite] (client) page reload src/types/careflow.ts
+5:21:02 PM [vite] server restarted.
+5:35:51 PM [vite] (client) page reload src/types/careflow.ts
+5:36:07 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:36:19 PM [vite] (client) page reload src/types/careflow.ts
+5:36:40 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:36:45 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:37:41 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:38:46 PM [vite] (client) page reload src/types/careflow.ts
+5:38:46 PM [vite] (client) hmr update /src/features/intake/IntakeForm.tsx, /src/styles/global.css
+5:40:31 PM [vite] (client) hmr update /src/styles/global.css, /src/app/App.tsx
+5:40:46 PM [vite] (client) hmr update /src/styles/global.css, /src/app/App.tsx
+5:41:01 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+5:41:02 PM [vite] (client) hmr update /src/app/App.tsx, /src/styles/global.css
+5:42:01 PM [vite] (client) hmr update /src/features/agent/AgentPerformanceSection.tsx, /src/styles/global.css
+5:42:03 PM [vite] (client) hmr update /src/features/agent/AgentPerformanceSection.tsx, /src/styles/global.css
+5:44:59 PM [vite] vite.config.js changed, restarting server...
+5:44:59 PM [vite] vite.config.js changed, restarting server...
+5:45:00 PM [vite] server restarted.

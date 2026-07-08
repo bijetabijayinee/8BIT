@@ -107,6 +107,7 @@ export function AgentPerformanceSection({ refreshSignal = 0 }: { refreshSignal?:
               <AgentCard key={agent.code} agent={agent} />
             ))}
           </div>
+          <ManualComparisonPanel data={data} />
           {data.pipeline ? <PipelinePanel pipeline={data.pipeline} /> : null}
         </>
       )}
@@ -123,6 +124,60 @@ function formatSeconds(seconds: number | null) {
   }
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${Math.round(seconds % 60)}s`;
+}
+
+function ManualComparisonPanel({ data }: { data: AgentPerformanceResponse }) {
+  const agentMinutes = data.pipeline?.avgIntakeToAssignSeconds == null
+    ? 2
+    : Math.max(1, Math.round(data.pipeline.avgIntakeToAssignSeconds / 60));
+  const manualMinutes = 12;
+  const savedMinutes = Math.max(0, manualMinutes - agentMinutes);
+  const automatedActions = Math.max(data.agentActionsTotal, 0);
+
+  const rows = [
+    {
+      label: 'Intake to doctor assignment',
+      manual: `${manualMinutes} min manual coordination`,
+      agent: `${agentMinutes} min agent assisted`,
+      impact: `${savedMinutes} min faster per routed patient`,
+    },
+    {
+      label: 'Status and handoff updates',
+      manual: 'Repeated calls or messages',
+      agent: `${automatedActions} recorded agent actions`,
+      impact: 'Less repeated coordination',
+    },
+    {
+      label: 'Patient lookup',
+      manual: 'Search notes and queue screens',
+      agent: 'Ask Savi in natural language',
+      impact: 'Faster context retrieval',
+    },
+  ];
+
+  return (
+    <section className="mt-6 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-700 text-white">
+          <Zap size={16} aria-hidden="true" />
+        </span>
+        <div>
+          <h4 className="text-base font-semibold text-slate-950">Manual work vs CareFlow</h4>
+          <p className="text-xs text-slate-600">Estimated efficiency view based on current agent activity.</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {rows.map((row) => (
+          <article key={row.label} className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-inset ring-emerald-100">
+            <p className="text-sm font-semibold text-slate-950">{row.label}</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">Manual: {row.manual}</p>
+            <p className="text-xs leading-5 text-emerald-800">CareFlow: {row.agent}</p>
+            <p className="mt-2 rounded-md bg-slate-950 px-2 py-1.5 text-xs font-semibold text-white">{row.impact}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function PipelinePanel({ pipeline }: { pipeline: PipelineObservability }) {

@@ -13,6 +13,9 @@ export interface QueueFilters {
 }
 
 export interface Vitals {
+  age?: number;
+  heightCm?: number;
+  weightKg?: number;
   temperatureC?: number;
   heartRate?: number;
   systolicPressure?: number;
@@ -98,9 +101,9 @@ export interface IntakeResponse {
 
 export interface CreateIntakeRequest {
   patientDisplayId?: string;
-  patientName?: string;
+  patientName: string;
   gender?: string;
-  contactPhone?: string;
+  contactPhone: string;
   ageBand: AgeBand;
   arrivalTimestamp?: string;
   arrivalMode: ArrivalMode;

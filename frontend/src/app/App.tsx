@@ -499,7 +499,7 @@ function HomeWorkspace({
     { label: 'Live queue', description: 'Triage priority', route: 'queue' as WorkspaceRoute },
     { label: 'LLM intake', description: 'Register arrival', route: 'intake' as WorkspaceRoute },
     { label: 'Beds & doctors', description: 'Allocation', route: 'allocation' as WorkspaceRoute },
-    { label: 'Care board', description: 'Workflow', route: 'board' as WorkspaceRoute },
+    { label: 'Patients', description: 'Directory', route: 'patients' as WorkspaceRoute },
     { label: 'Savi knowledge', description: 'Docs & patients', route: 'knowledge' as WorkspaceRoute },
     { label: 'Dashboard', description: 'Agent analytics', route: 'dashboard' as WorkspaceRoute },
   ];

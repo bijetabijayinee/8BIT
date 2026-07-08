@@ -181,7 +181,11 @@ public class QueueService {
         StaffUser actor = staffUserService.resolveActor(safeRequest.actorName(), safeRequest.actorRole(), null);
         QueueEntry entry = queueEntryRepository.findByPatientId(patientId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Queue entry not found."));
-        entry.updateStatus(QueueStatus.LEFT_WITHOUT_BEING_SEEN);
+        if (entry.getStatus() == QueueStatus.IN_TREATMENT || entry.getStatus() == QueueStatus.DISCHARGED) {
+            entry.updateStatus(QueueStatus.DISCHARGED);
+        } else {
+            entry.updateStatus(QueueStatus.LEFT_WITHOUT_BEING_SEEN);
+        }
         patientAgentService.handleRemovedFromQueue(entry, actor, safeRequest.reason());
         refreshVectorContext(entry);
         queueEntryRepository.delete(entry);

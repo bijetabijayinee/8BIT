@@ -5,15 +5,16 @@ import com.careflowai.common.ArrivalMode;
 import com.careflowai.common.QueueStatus;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
 import java.util.List;
 
 public record CreateIntakeRequest(
     String patientDisplayId,
-    String patientName,
+    @NotBlank String patientName,
     String gender,
-    String contactPhone,
+    @NotBlank String contactPhone,
     @NotNull AgeBand ageBand,
     Instant arrivalTimestamp,
     @NotNull ArrivalMode arrivalMode,

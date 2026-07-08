@@ -52,14 +52,29 @@ const distressLevels = [
 ];
 
 const riskFlagOptions: Array<{ key: keyof RiskFlags; label: string }> = [
-  { key: 'chestPain', label: 'Chest pain' },
-  { key: 'breathingDifficulty', label: 'Breathing difficulty' },
-  { key: 'alteredMentalState', label: 'Altered mental state' },
-  { key: 'severeBleeding', label: 'Severe bleeding' },
-  { key: 'pregnancy', label: 'Pregnancy' },
-  { key: 'pediatricRisk', label: 'Pediatric risk' },
-  { key: 'fallOrTrauma', label: 'Fall or trauma' },
-  { key: 'immunocompromised', label: 'Immunocompromised' },
+  { key: 'chestPain', label: 'Chest pain or cardiac symptoms' },
+  { key: 'breathingDifficulty', label: 'Breathing difficulty or low oxygen signs' },
+  { key: 'alteredMentalState', label: 'Confusion, fainting, seizure, or stroke signs' },
+  { key: 'severeBleeding', label: 'Severe bleeding, burns, wound, or infection signs' },
+  { key: 'pregnancy', label: 'Pregnancy or obstetric concern' },
+  { key: 'pediatricRisk', label: 'Child, infant, or age-specific concern' },
+  { key: 'fallOrTrauma', label: 'Fall, trauma, fracture, or head injury' },
+  { key: 'immunocompromised', label: 'Fever, dehydration, immune risk, or chronic illness' },
+];
+
+const symptomChips = [
+  'fever',
+  'vomiting',
+  'abdominal pain',
+  'headache',
+  'dizziness',
+  'weakness',
+  'rash',
+  'seizure',
+  'dehydration',
+  'swelling',
+  'back pain',
+  'urinary symptoms',
 ];
 
 const emptyRiskFlags: RiskFlags = {
@@ -73,14 +88,7 @@ const emptyRiskFlags: RiskFlags = {
   immunocompromised: false,
 };
 
-const defaultVitals: Vitals = {
-  temperatureC: 36.8,
-  heartRate: 82,
-  systolicPressure: 120,
-  diastolicPressure: 78,
-  respiratoryRate: 16,
-  oxygenSaturation: 98,
-};
+const defaultVitals: Vitals = {};
 
 const genderOptions = [
   { value: '', label: 'Not disclosed' },
@@ -233,9 +241,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
 
   const buildRequest = (): CreateIntakeRequest => ({
     patientDisplayId: patientDisplayId.startsWith('Generating') ? undefined : patientDisplayId,
-    patientName: normalizeOptionalText(form.patientName),
+    patientName: form.patientName.trim(),
     gender: normalizeOptionalText(form.gender),
-    contactPhone: normalizeOptionalText(form.contactPhone),
+    contactPhone: form.contactPhone.trim(),
     ageBand: form.ageBand,
     arrivalTimestamp: new Date(form.arrivalTimestamp).toISOString(),
     arrivalMode: form.arrivalMode,
@@ -300,6 +308,16 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
     } finally {
       setIsDraftingNotes(false);
     }
+  };
+
+  const toggleSymptom = (symptom: string) => {
+    const nextSymptoms = new Set(structuredSymptoms);
+    if (nextSymptoms.has(symptom)) {
+      nextSymptoms.delete(symptom);
+    } else {
+      nextSymptoms.add(symptom);
+    }
+    updateField('structuredSymptoms', Array.from(nextSymptoms).join(', '));
   };
 
   return (
@@ -395,9 +413,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
                 <p className="mt-1 text-lg font-semibold text-slate-950">{patientDisplayId}</p>
               </div>
 
-              <TextInput label="Patient name" value={form.patientName} onChange={handleTextChange('patientName')} placeholder="Full name (optional)" />
+              <TextInput label="Full name" value={form.patientName} onChange={handleTextChange('patientName')} placeholder="Patient full name" required />
               <SelectInput label="Gender" value={form.gender} onChange={(value) => updateField('gender', value)} options={genderOptions} />
-              <TextInput label="Contact phone" value={form.contactPhone} onChange={handleTextChange('contactPhone')} placeholder="+91 98… (optional)" />
+              <TextInput label="Contact phone" value={form.contactPhone} onChange={handleTextChange('contactPhone')} placeholder="+91 98765 43210" required />
 
               <label className="text-sm font-medium text-slate-700">
                 Department
@@ -431,6 +449,28 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
             <div className="grid gap-3">
               <TextInput label="Chief complaint" value={form.chiefComplaint} onChange={handleTextChange('chiefComplaint')} required placeholder="Chest pressure and nausea" />
               <TextInput label="Structured symptoms" value={form.structuredSymptoms} onChange={handleTextChange('structuredSymptoms')} placeholder="shortness of breath, nausea" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">Common symptom quick add</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {symptomChips.map((symptom) => {
+                    const active = structuredSymptoms.includes(symptom);
+                    return (
+                      <button
+                        key={symptom}
+                        type="button"
+                        onClick={() => toggleSymptom(symptom)}
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset transition ${
+                          active
+                            ? 'bg-slate-950 text-white ring-slate-950'
+                            : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {symptom}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               <div className="text-sm font-medium text-slate-700">
                 <div className="flex items-center justify-between gap-2">
@@ -484,14 +524,17 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
                 type="button"
                 onClick={() => updateField('vitals', { ...defaultVitals })}
                 className="inline-flex h-7 items-center gap-1.5 rounded-full bg-slate-100 px-2.5 text-[11px] font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-200"
-                title="Reset all vitals to baseline values"
+                title="Clear vitals"
               >
                 <RotateCcw size={11} aria-hidden="true" />
-                Reset vitals
+                Clear
               </button>
             }
           >
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <VitalInput label="Age" value={form.vitals.age} onChange={(value) => updateVitals('age', value)} />
+              <VitalInput label="Height cm" value={form.vitals.heightCm} onChange={(value) => updateVitals('heightCm', value)} step="0.1" />
+              <VitalInput label="Weight kg" value={form.vitals.weightKg} onChange={(value) => updateVitals('weightKg', value)} step="0.1" />
               <VitalInput label="Temp C" value={form.vitals.temperatureC} onChange={(value) => updateVitals('temperatureC', value)} step="0.1" />
               <VitalInput label="Heart rate" value={form.vitals.heartRate} onChange={(value) => updateVitals('heartRate', value)} />
               <VitalInput label="Systolic" value={form.vitals.systolicPressure} onChange={(value) => updateVitals('systolicPressure', value)} />

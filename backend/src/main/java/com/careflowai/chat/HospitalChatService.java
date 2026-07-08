@@ -27,6 +27,9 @@ public class HospitalChatService {
     }
 
     public synchronized List<HospitalChatMessageResponse> post(HospitalChatRequest request) {
+        if (isDuplicate(request)) {
+            return List.copyOf(messages);
+        }
         append(new HospitalChatMessageResponse(
             UUID.randomUUID().toString(),
             request.authorName(),
@@ -62,5 +65,18 @@ public class HospitalChatService {
         while (messages.size() > MAX_MESSAGES) {
             messages.remove(0);
         }
+    }
+
+    private boolean isDuplicate(HospitalChatRequest request) {
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            HospitalChatMessageResponse last = messages.get(index);
+            if (last.savi()) {
+                continue;
+            }
+            return last.authorName().equalsIgnoreCase(request.authorName())
+                && last.body().equalsIgnoreCase(request.body().trim())
+                && java.time.Duration.between(last.createdAt(), Instant.now()).toSeconds() < 4;
+        }
+        return false;
     }
 }

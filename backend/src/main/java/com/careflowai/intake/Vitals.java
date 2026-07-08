@@ -7,6 +7,14 @@ import java.math.BigDecimal;
 @Embeddable
 public class Vitals {
 
+    private Integer age;
+
+    @Column(name = "height_cm")
+    private BigDecimal heightCm;
+
+    @Column(name = "weight_kg")
+    private BigDecimal weightKg;
+
     @Column(name = "temperature_c")
     private BigDecimal temperatureC;
     private Integer heartRate;
@@ -14,6 +22,30 @@ public class Vitals {
     private Integer diastolicPressure;
     private Integer respiratoryRate;
     private Integer oxygenSaturation;
+
+    public Integer getAge() {
+        return age;
+    }
+
+    public void setAge(Integer age) {
+        this.age = age;
+    }
+
+    public BigDecimal getHeightCm() {
+        return heightCm;
+    }
+
+    public void setHeightCm(BigDecimal heightCm) {
+        this.heightCm = heightCm;
+    }
+
+    public BigDecimal getWeightKg() {
+        return weightKg;
+    }
+
+    public void setWeightKg(BigDecimal weightKg) {
+        this.weightKg = weightKg;
+    }
 
     public BigDecimal getTemperatureC() {
         return temperatureC;

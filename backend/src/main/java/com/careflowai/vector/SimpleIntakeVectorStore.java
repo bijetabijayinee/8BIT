@@ -119,7 +119,7 @@ public class SimpleIntakeVectorStore {
         return """
             Patient %s. Age band %s. Department %s. Status %s. Arrival %s via %s.
             Chief complaint: %s. Symptoms: %s. Notes: %s. Distress score %d.
-            Vitals: temperature %s C, heart rate %s, blood pressure %s/%s, respiratory rate %s, oxygen %s.
+            Vitals: age %s, height %s cm, weight %s kg, temperature %s C, heart rate %s, blood pressure %s/%s, respiratory rate %s, oxygen %s.
             Risk flags: chest pain %s, breathing difficulty %s, altered mental state %s, severe bleeding %s,
             pregnancy %s, pediatric risk %s, fall or trauma %s, immunocompromised %s.
             %s
@@ -135,6 +135,9 @@ public class SimpleIntakeVectorStore {
             intake.getStructuredSymptoms().isEmpty() ? "none recorded" : String.join(", ", intake.getStructuredSymptoms()),
             valueOrUnknown(intake.getSymptomNotes()),
             intake.getPainLevel(),
+            valueOrUnknown(intake.getVitals().getAge()),
+            valueOrUnknown(intake.getVitals().getHeightCm()),
+            valueOrUnknown(intake.getVitals().getWeightKg()),
             valueOrUnknown(intake.getVitals().getTemperatureC()),
             valueOrUnknown(intake.getVitals().getHeartRate()),
             valueOrUnknown(intake.getVitals().getSystolicPressure()),

@@ -70,7 +70,7 @@ public class PatientReportService {
             Symptoms: %s
             Notes: %s
             Pain/distress: %d
-            Vitals: Temp %s C, HR %s, BP %s/%s, RR %s, SpO2 %s
+            Vitals: Age %s, height %s cm, weight %s kg, Temp %s C, HR %s, BP %s/%s, RR %s, SpO2 %s
             Risks: chest pain %s, breathing difficulty %s, altered mental state %s, severe bleeding %s, pregnancy %s, pediatric risk %s, fall/trauma %s, immunocompromised %s
             Assessment: %s
             Suggested diagnosis: %s
@@ -87,6 +87,9 @@ public class PatientReportService {
             intake.getStructuredSymptoms().isEmpty() ? "Not recorded" : String.join(", ", intake.getStructuredSymptoms()),
             valueOrNone(intake.getSymptomNotes()),
             intake.getPainLevel(),
+            valueOrNone(intake.getVitals().getAge()),
+            valueOrNone(intake.getVitals().getHeightCm()),
+            valueOrNone(intake.getVitals().getWeightKg()),
             valueOrNone(intake.getVitals().getTemperatureC()),
             valueOrNone(intake.getVitals().getHeartRate()),
             valueOrNone(intake.getVitals().getSystolicPressure()),
@@ -121,7 +124,7 @@ public class PatientReportService {
             %s
 
             ## Vitals And Risks
-            Temp %s C, HR %s, BP %s/%s, RR %s, SpO2 %s. Distress score %d.
+            Age %s, height %s cm, weight %s kg. Temp %s C, HR %s, BP %s/%s, RR %s, SpO2 %s. Distress score %d.
 
             ## Care Team Next Steps
             Review the intake record, validate the triage findings, and document clinician-directed next steps.
@@ -132,6 +135,9 @@ public class PatientReportService {
             intake.getChiefComplaint(),
             assessment == null ? "No assessment is recorded." : assessment.getFinalCategory() + " urgency with score " + assessment.getFinalScore() + ".",
             assessment == null ? "No medical attention note is recorded." : valueOrNone(assessment.getMedicalAttentionNote()),
+            valueOrNone(intake.getVitals().getAge()),
+            valueOrNone(intake.getVitals().getHeightCm()),
+            valueOrNone(intake.getVitals().getWeightKg()),
             valueOrNone(intake.getVitals().getTemperatureC()),
             valueOrNone(intake.getVitals().getHeartRate()),
             valueOrNone(intake.getVitals().getSystolicPressure()),

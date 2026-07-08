@@ -42,6 +42,9 @@ public record IntakeResponse(
             new ArrayList<>(intake.getStructuredSymptoms()),
             intake.getPainLevel(),
             new VitalsDto(
+                intake.getVitals().getAge(),
+                intake.getVitals().getHeightCm(),
+                intake.getVitals().getWeightKg(),
                 intake.getVitals().getTemperatureC(),
                 intake.getVitals().getHeartRate(),
                 intake.getVitals().getSystolicPressure(),

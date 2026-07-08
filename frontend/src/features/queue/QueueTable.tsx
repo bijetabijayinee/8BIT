@@ -1738,6 +1738,27 @@ function VitalsTable({ vitals }: { vitals: IntakeResponse['vitals'] }) {
 
   const rows: Array<{ icon: ReactNode; label: string; value: string; unit: string; status: VitalStatus }> = [
     {
+      icon: <UserRoundCheck size={15} aria-hidden="true" />,
+      label: 'Age',
+      value: vitals.age != null ? String(vitals.age) : '—',
+      unit: 'yrs',
+      status: vitals.age == null ? 'missing' : 'ok',
+    },
+    {
+      icon: <Gauge size={15} aria-hidden="true" />,
+      label: 'Height',
+      value: vitals.heightCm != null ? vitals.heightCm.toFixed(1) : '—',
+      unit: 'cm',
+      status: vitals.heightCm == null ? 'missing' : 'ok',
+    },
+    {
+      icon: <Gauge size={15} aria-hidden="true" />,
+      label: 'Weight',
+      value: vitals.weightKg != null ? vitals.weightKg.toFixed(1) : '—',
+      unit: 'kg',
+      status: vitals.weightKg == null ? 'missing' : 'ok',
+    },
+    {
       icon: <Thermometer size={15} aria-hidden="true" />,
       label: 'Temperature',
       value: vitals.temperatureC != null ? vitals.temperatureC.toFixed(1) : '—',
