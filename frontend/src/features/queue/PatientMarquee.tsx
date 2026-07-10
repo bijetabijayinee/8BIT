@@ -1,10 +1,12 @@
 import { AlertTriangle, Activity, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getQueueEntries } from '../../api/client';
-import type { QueueEntry, UrgencyCategory } from '../../types/careflow';
+import { PatientDetailDialog } from '../../components/PatientDetailDialog';
+import type { QueueEntry, StaffUser, UrgencyCategory } from '../../types/careflow';
 
 interface PatientMarqueeProps {
   refreshSignal?: number;
+  activeStaff?: StaffUser | null;
   onSelectPatient?: (entry: QueueEntry) => void;
 }
 
@@ -25,8 +27,9 @@ const pillStyles: Record<UrgencyCategory, { dot: string; text: string; ring: str
  * Critical cases glow red, high urgency amber, everything else stays neutral. Hovering
  * pauses the scroll and each pill is clickable to jump straight to that patient.
  */
-export function PatientMarquee({ refreshSignal = 0, onSelectPatient }: PatientMarqueeProps) {
+export function PatientMarquee({ refreshSignal = 0, activeStaff = null, onSelectPatient }: PatientMarqueeProps) {
   const [entries, setEntries] = useState<QueueEntry[]>([]);
+  const [selected, setSelected] = useState<QueueEntry | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +38,14 @@ export function PatientMarquee({ refreshSignal = 0, onSelectPatient }: PatientMa
       // Keep the last known snapshot; the ticker just holds steady on a fetch miss.
     }
   }, []);
+
+  const handleClick = (entry: QueueEntry) => {
+    if (onSelectPatient) {
+      onSelectPatient(entry);
+      return;
+    }
+    setSelected(entry);
+  };
 
   useEffect(() => {
     void load();
@@ -91,7 +102,7 @@ export function PatientMarquee({ refreshSignal = 0, onSelectPatient }: PatientMa
                     <button
                       key={`${copy}-${entry.patientId}`}
                       type="button"
-                      onClick={() => onSelectPatient?.(entry)}
+                      onClick={() => handleClick(entry)}
                       title={`${entry.patientDisplayId} - ${entry.chiefComplaint} - ${entry.waitingMinutes}m waiting`}
                       className={`inline-flex shrink-0 items-center gap-2 rounded-full bg-white/5 px-3 py-1 text-xs ring-1 ring-inset transition hover:bg-white/12 ${style.ring} ${style.glow}`}
                     >
@@ -110,6 +121,16 @@ export function PatientMarquee({ refreshSignal = 0, onSelectPatient }: PatientMa
           </div>
         )}
       </div>
+
+      {selected ? (
+        <PatientDetailDialog
+          intakeId={selected.intakeId}
+          patientDisplayId={selected.patientDisplayId}
+          activeStaff={activeStaff}
+          onChanged={() => void load()}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
     </div>
   );
 }

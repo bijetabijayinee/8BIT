@@ -20,6 +20,7 @@ import {
   Search,
   ShieldAlert,
   Stethoscope,
+  TrendingUp,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ import { MetricsDashboard } from '../features/metrics';
 import { PeopleDirectory } from '../features/people';
 import { QueueTable } from '../features/queue';
 import { WaitingRoomQueue } from '../features/queue/WaitingRoomQueue';
+import { ResultsDashboard } from '../features/results/ResultsDashboard';
 import type {
   Appointment,
   HospitalAllocation,
@@ -47,7 +49,7 @@ import type {
   StaffUser,
 } from '../types/careflow';
 
-type WorkspaceRoute = 'home' | 'queue' | 'patients' | 'intake' | 'allocation' | 'dashboard' | 'people' | 'knowledge' | 'calendar';
+type WorkspaceRoute = 'home' | 'queue' | 'patients' | 'intake' | 'allocation' | 'dashboard' | 'results' | 'people' | 'knowledge' | 'calendar';
 
 const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: LucideIcon }> = [
   { route: 'home', label: 'Home', icon: Home },
@@ -56,6 +58,7 @@ const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: Lucid
   { route: 'intake', label: 'Intake', icon: ClipboardPlus },
   { route: 'allocation', label: 'Allocation', icon: BedDouble },
   { route: 'dashboard', label: 'Dashboard', icon: Gauge },
+  { route: 'results', label: 'Results', icon: TrendingUp },
   { route: 'people', label: 'People', icon: UsersRound },
   { route: 'knowledge', label: 'Knowledge', icon: FileUp },
   { route: 'calendar', label: 'Calendar', icon: CalendarDays },
@@ -77,6 +80,7 @@ function routeFromHash(): WorkspaceRoute {
     hash === 'home' ||
     hash === 'intake' ||
     hash === 'dashboard' ||
+    hash === 'results' ||
     hash === 'queue' ||
     hash === 'people' ||
     hash === 'patients' ||
@@ -289,7 +293,7 @@ function WorkspaceApp() {
           </button>
         </aside>
 
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="paper-texture flex min-w-0 flex-1 flex-col">
           <header className="sticky top-12 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -345,8 +349,9 @@ function WorkspaceApp() {
               <IntakeForm departments={departments} activeStaff={activeStaff} onCreated={refreshOperationalViews} />
             ) : null}
             {activeRoute === 'patients' ? <PatientsDirectoryPage /> : null}
-            {activeRoute === 'allocation' ? <AllocationDashboard /> : null}
+            {activeRoute === 'allocation' ? <AllocationDashboard activeStaff={activeStaff} /> : null}
             {activeRoute === 'dashboard' ? <MetricsDashboard refreshSignal={metricsRefreshKey} /> : null}
+            {activeRoute === 'results' ? <ResultsDashboard /> : null}
             {activeRoute === 'people' ? <PeopleDirectory departments={departments} /> : null}
             {activeRoute === 'knowledge' ? <KnowledgePage /> : null}
             {activeRoute === 'calendar' ? <AppointmentsCalendar appointments={appointments} /> : null}

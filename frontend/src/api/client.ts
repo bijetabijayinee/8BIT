@@ -14,6 +14,7 @@ import type {
   PatientReportResponse,
   PatientStory,
   QueueMetrics,
+  ResultsAnalytics,
   QueueEntry,
   QueueFilters,
   SaveStaffUserRequest,
@@ -142,8 +143,15 @@ export function createIntake(request: CreateIntakeRequest) {
   });
 }
 
-export async function getNextPatientDisplayId() {
-  const response = await apiRequest<{ patientDisplayId: string }>('/api/intakes/next-patient-display-id');
+export async function getNextPatientDisplayId(department?: string) {
+  const params = new URLSearchParams();
+  if (department?.trim()) {
+    params.set('department', department.trim());
+  }
+  const query = params.toString();
+  const response = await apiRequest<{ patientDisplayId: string }>(
+    `/api/intakes/next-patient-display-id${query ? `?${query}` : ''}`,
+  );
   return response.patientDisplayId;
 }
 
@@ -327,6 +335,10 @@ export function getPatientStory(patientId: string) {
 
 export function getAgentPerformance() {
   return apiRequest<AgentPerformanceResponse>('/api/agent/performance');
+}
+
+export function getResultsAnalytics() {
+  return apiRequest<ResultsAnalytics>('/api/analytics/results');
 }
 
 export function getNotifications(role?: StaffRole, staffLookup?: string) {

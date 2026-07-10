@@ -26,6 +26,15 @@ import type {
   Vitals,
 } from '../../types/careflow';
 
+// Dev-only helper (see .gitignore): fills the form with a random patient for fast manual
+// testing. The glob import tolerates the file being absent entirely - it just resolves to
+// an empty object - so this never breaks a build on a machine that hasn't got the file.
+const devTools = import.meta.glob('./DevRandomPatientTool.tsx', { eager: true }) as Record<
+  string,
+  { DevRandomPatientTool?: (props: { departments: string[]; onFill: (patch: Partial<IntakeFormState>) => void }) => ReactNode }
+>;
+const DevRandomPatientTool = Object.values(devTools)[0]?.DevRandomPatientTool;
+
 const ageBands: Array<{ value: AgeBand; label: string }> = [
   { value: 'ADULT', label: 'Adult' },
   { value: 'CHILD', label: 'Child' },
@@ -97,7 +106,7 @@ const genderOptions = [
   { value: 'Other', label: 'Other' },
 ];
 
-interface IntakeFormState {
+export interface IntakeFormState {
   patientName: string;
   gender: string;
   contactPhone: string;
@@ -194,17 +203,19 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
     });
   }, [departments]);
 
-  const refreshPatientDisplayId = async () => {
+  const refreshPatientDisplayId = async (department: string) => {
     try {
-      setPatientDisplayId(await getNextPatientDisplayId());
+      setPatientDisplayId(await getNextPatientDisplayId(department));
     } catch {
       setPatientDisplayId(`CF-${Date.now().toString().slice(-8)}`);
     }
   };
 
+  // Re-preview the ID whenever the department changes, so it always reflects
+  // the department-prefixed pattern (EM-, OR-, PE-, ...) for the selected department.
   useEffect(() => {
-    void refreshPatientDisplayId();
-  }, []);
+    void refreshPatientDisplayId(form.department);
+  }, [form.department]);
 
   const updateField = <TKey extends keyof IntakeFormState>(key: TKey, value: IntakeFormState[TKey]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -231,8 +242,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
   };
 
   const resetForm = () => {
-    setForm(createInitialState(departments));
-    void refreshPatientDisplayId();
+    const nextState = createInitialState(departments);
+    setForm(nextState);
+    void refreshPatientDisplayId(nextState.department);
     setError(null);
     setSuccessMessage(null);
     setCreatedIntake(null);
@@ -272,8 +284,9 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
       setSuccessMessage(
         `${created.patientDisplayId} added to the queue with LLM urgency ${created.assessment?.finalCategory ?? 'pending'}.`,
       );
-      setForm(createInitialState(departments));
-      await refreshPatientDisplayId();
+      const nextState = createInitialState(departments);
+      setForm(nextState);
+      await refreshPatientDisplayId(nextState.department);
       onCreated?.();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to create intake.');
@@ -338,7 +351,13 @@ export function IntakeForm({ departments, activeStaff, onCreated }: IntakeFormPr
             </h2>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {import.meta.env.DEV && DevRandomPatientTool ? (
+              <DevRandomPatientTool
+                departments={departments}
+                onFill={(patch) => setForm((current) => ({ ...current, ...patch }))}
+              />
+            ) : null}
             <button
               type="button"
               onClick={resetForm}

@@ -18,8 +18,6 @@ import com.careflowai.queue.QueueService;
 import com.careflowai.staff.StaffUser;
 import com.careflowai.staff.StaffUserService;
 import com.careflowai.vector.SimpleIntakeVectorStore;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -69,7 +67,7 @@ public class IntakeService {
 
     @Transactional
     public IntakeResponse create(CreateIntakeRequest request) {
-        String patientDisplayId = resolvePatientDisplayId(request.patientDisplayId());
+        String patientDisplayId = resolvePatientDisplayId(request.patientDisplayId(), request.department());
         patientRepository.findByDisplayId(patientDisplayId).ifPresent(existing -> {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Patient display ID already exists.");
         });
@@ -112,8 +110,8 @@ public class IntakeService {
     }
 
     @Transactional(readOnly = true)
-    public String nextPatientDisplayId() {
-        return generatePatientDisplayId();
+    public String nextPatientDisplayId(String department) {
+        return generatePatientDisplayId(department);
     }
 
     @Transactional(readOnly = true)
@@ -166,22 +164,37 @@ public class IntakeService {
         return parts.isEmpty() ? null : String.join(" | ", parts);
     }
 
-    private String resolvePatientDisplayId(String requestedDisplayId) {
+    private String resolvePatientDisplayId(String requestedDisplayId, String department) {
         if (requestedDisplayId != null && !requestedDisplayId.isBlank()) {
             return requestedDisplayId.trim().toUpperCase();
         }
-        return generatePatientDisplayId();
+        return generatePatientDisplayId(department);
     }
 
-    private String generatePatientDisplayId() {
-        String datePart = LocalDate.now(ZoneOffset.UTC).toString().replace("-", "");
-        String prefix = "CF-" + datePart + "-";
-        long nextNumber = patientRepository.countByDisplayIdStartingWith(prefix) + 1;
+    /**
+     * Department-prefixed patient IDs (e.g. EM-1001, OR-1002, PE-1003) matching the hospital's
+     * original numbering convention: the first two letters of the department, then a sequential
+     * number per prefix starting at 1001.
+     */
+    private String generatePatientDisplayId(String department) {
+        String prefix = departmentPrefix(department);
+        long nextNumber = 1000 + patientRepository.countByDisplayIdStartingWith(prefix + "-") + 1;
         String candidate;
         do {
-            candidate = prefix + String.format("%04d", nextNumber++);
+            candidate = prefix + "-" + nextNumber++;
         } while (patientRepository.findByDisplayId(candidate).isPresent());
         return candidate;
+    }
+
+    private String departmentPrefix(String department) {
+        if (department == null) {
+            return "CF";
+        }
+        String letters = department.replaceAll("[^A-Za-z]", "");
+        if (letters.isBlank()) {
+            return "CF";
+        }
+        return letters.substring(0, Math.min(2, letters.length())).toUpperCase();
     }
 
     private String staffAttribution(StaffUser actor) {

@@ -12,6 +12,8 @@ public enum StaffRole {
     }
 
     public boolean canUpdateQueueStatus() {
-        return this == DOCTOR || canOverridePriority();
+        // Intake staff can move patients through the queue (including starting treatment)
+        // so a single desk can run the floor end to end in a small ED.
+        return this == DOCTOR || this == INTAKE_STAFF || canOverridePriority();
     }
 }

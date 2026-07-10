@@ -17,7 +17,9 @@ import com.careflowai.queue.QueueEntry;
 import com.careflowai.staff.StaffUser;
 import com.careflowai.staff.StaffUserRepository;
 import com.careflowai.staff.StaffUserService;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
@@ -374,27 +376,72 @@ public class PatientAgentService {
     private AssignmentDecision resolveAssignedDoctor(Intake intake, UrgencyAssessment assessment, StaffUser fallbackActor,
                                                      String researchBriefing) {
         List<StaffUser> activeDoctors = staffUserRepository.findByRoleAndActiveTrueOrderByCreatedAtAsc(StaffRole.DOCTOR);
-        return aiDoctorAssignmentService.recommend(intake, assessment, activeDoctors, researchBriefing)
+        Map<UUID, Integer> load = activeLoadByDoctor();
+        AssignmentDecision decision = aiDoctorAssignmentService
+            .recommend(intake, assessment, activeDoctors, researchBriefing, load)
             .flatMap(recommendation -> activeDoctors.stream()
                 .filter(doctor -> doctor.getStaffCode().equalsIgnoreCase(recommendation.staffCode()))
                 .findFirst()
                 .map(doctor -> new AssignmentDecision(doctor, assignmentReason(doctor, recommendation))))
-            .orElseGet(() -> fallbackAssignment(intake, activeDoctors, fallbackActor));
+            .orElseGet(() -> fallbackAssignment(intake, activeDoctors, load, fallbackActor));
+        return enforceBalance(decision, intake, activeDoctors, load, fallbackActor);
     }
 
-    private AssignmentDecision fallbackAssignment(Intake intake, List<StaffUser> activeDoctors, StaffUser fallbackActor) {
-        StaffUser fallbackDoctor = activeDoctors.stream()
-            .filter(doctor -> sameText(doctor.getDepartment(), intake.getDepartment()))
-            .findFirst()
-            .or(() -> activeDoctors.stream().findFirst())
-            .orElse(fallbackActor);
+    /**
+     * Guards the max-3-per-doctor cap after the LLM (or fallback) has spoken: if the chosen
+     * doctor is already at capacity while a comparable doctor still has room, the patient is
+     * re-routed to the least-loaded eligible doctor so no one doctor gets funnelled every case.
+     */
+    private AssignmentDecision enforceBalance(AssignmentDecision decision, Intake intake, List<StaffUser> activeDoctors,
+                                              Map<UUID, Integer> load, StaffUser fallbackActor) {
+        if (decision == null || decision.doctor() == null) {
+            return decision;
+        }
+        int chosenLoad = load.getOrDefault(decision.doctor().getId(), 0);
+        if (chosenLoad < AiDoctorAssignmentService.MAX_ACTIVE_PATIENTS_PER_DOCTOR) {
+            return decision;
+        }
+        return leastLoadedDoctor(intake, activeDoctors, load)
+            .filter(doctor -> load.getOrDefault(doctor.getId(), 0) < AiDoctorAssignmentService.MAX_ACTIVE_PATIENTS_PER_DOCTOR)
+            .filter(doctor -> !doctor.getId().equals(decision.doctor().getId()))
+            .map(doctor -> new AssignmentDecision(doctor,
+                "Load-balanced to %s: the best-fit doctor was already at the %d-patient cap.".formatted(
+                    doctor.getDisplayName(), AiDoctorAssignmentService.MAX_ACTIVE_PATIENTS_PER_DOCTOR)))
+            .orElse(decision);
+    }
+
+    private AssignmentDecision fallbackAssignment(Intake intake, List<StaffUser> activeDoctors,
+                                                  Map<UUID, Integer> load, StaffUser fallbackActor) {
+        StaffUser fallbackDoctor = leastLoadedDoctor(intake, activeDoctors, load).orElse(fallbackActor);
         if (fallbackDoctor == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "No active doctor is available for assignment.");
         }
         return new AssignmentDecision(
             fallbackDoctor,
-            "Fallback assignment used because the LLM doctor recommendation was unavailable."
+            "Balanced fallback: routed to %s (%d active), the least-loaded fitting doctor.".formatted(
+                fallbackDoctor.getDisplayName(), load.getOrDefault(fallbackDoctor.getId(), 0))
         );
+    }
+
+    /**
+     * Picks the doctor who should take the next patient: prefer a department match, then the
+     * lowest active-patient count, then the longest-serving doctor as a stable tie-break. This
+     * spreads arrivals evenly instead of always landing on the first doctor in the roster.
+     */
+    private Optional<StaffUser> leastLoadedDoctor(Intake intake, List<StaffUser> activeDoctors, Map<UUID, Integer> load) {
+        Comparator<StaffUser> byFitThenLoad = Comparator
+            .comparingInt((StaffUser doctor) -> sameText(doctor.getDepartment(), intake.getDepartment()) ? 0 : 1)
+            .thenComparingInt(doctor -> load.getOrDefault(doctor.getId(), 0))
+            .thenComparing(StaffUser::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+        return activeDoctors.stream().min(byFitThenLoad);
+    }
+
+    /** Active patients currently held by each doctor, from live (non-deactivated) assignments. */
+    private Map<UUID, Integer> activeLoadByDoctor() {
+        Map<UUID, Integer> load = new java.util.HashMap<>();
+        assignmentRepository.findByActiveTrueOrderByAssignedAtDesc()
+            .forEach(assignment -> load.merge(assignment.getAssignedDoctor().getId(), 1, Integer::sum));
+        return load;
     }
 
     private String assignmentReason(StaffUser doctor, AiDoctorAssignmentOutput recommendation) {

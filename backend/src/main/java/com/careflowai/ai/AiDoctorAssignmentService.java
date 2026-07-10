@@ -9,20 +9,27 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiDoctorAssignmentService {
+
+    /** A doctor can hold at most this many active patients before new ones must wait. */
+    public static final int MAX_ACTIVE_PATIENTS_PER_DOCTOR = 3;
 
     private static final String INSTRUCTION = """
         You are CareFlow AI's doctor assignment agent for a hospital queue MVP.
         You do not diagnose or recommend treatment. Choose the best doctor from the provided roster only.
         Return only compact JSON with: staffCode, assignmentReason.
         staffCode must exactly match one availableDoctors[].staffCode.
-        Base the assignment on urgency, department, specialty fit, symptoms, risk flags, vitals, and workload context
-        supplied in the payload. If medicalResearchBriefing is present, use it to judge which specialty
-        the condition needs. Keep assignmentReason under 300 characters.
-        """;
+        Base the assignment on urgency, department, specialty fit, symptoms, risk flags, vitals, and workload.
+        Balance the load: each doctor has an activePatients count and a capacity of %d. Never pick a doctor whose
+        atCapacity is true if any comparable doctor is below capacity. When specialty fit is similar, prefer the
+        doctor with the fewest activePatients so patients are spread evenly across the roster - do not funnel
+        everyone to one doctor. If medicalResearchBriefing is present, use it to judge which specialty the
+        condition needs. Keep assignmentReason under 300 characters.
+        """.formatted(MAX_ACTIVE_PATIENTS_PER_DOCTOR);
 
     private final OpenAiResponsesClient responsesClient;
     private final ObjectMapper objectMapper;
@@ -34,11 +41,17 @@ public class AiDoctorAssignmentService {
 
     public Optional<AiDoctorAssignmentOutput> recommend(Intake intake, UrgencyAssessment assessment,
                                                         List<StaffUser> availableDoctors) {
-        return recommend(intake, assessment, availableDoctors, null);
+        return recommend(intake, assessment, availableDoctors, null, Map.of());
     }
 
     public Optional<AiDoctorAssignmentOutput> recommend(Intake intake, UrgencyAssessment assessment,
                                                         List<StaffUser> availableDoctors, String researchBriefing) {
+        return recommend(intake, assessment, availableDoctors, researchBriefing, Map.of());
+    }
+
+    public Optional<AiDoctorAssignmentOutput> recommend(Intake intake, UrgencyAssessment assessment,
+                                                        List<StaffUser> availableDoctors, String researchBriefing,
+                                                        Map<UUID, Integer> activeLoadByDoctor) {
         if (!responsesClient.isAvailable() || availableDoctors.isEmpty()) {
             return Optional.empty();
         }
@@ -46,7 +59,7 @@ public class AiDoctorAssignmentService {
         try {
             String response = responsesClient.respond(
                 INSTRUCTION,
-                objectMapper.writeValueAsString(payload(intake, assessment, availableDoctors, researchBriefing))
+                objectMapper.writeValueAsString(payload(intake, assessment, availableDoctors, researchBriefing, activeLoadByDoctor))
             );
             JsonNode json = objectMapper.readTree(extractJson(response));
             String staffCode = text(json, "staffCode");
@@ -61,15 +74,16 @@ public class AiDoctorAssignmentService {
     }
 
     private Map<String, Object> payload(Intake intake, UrgencyAssessment assessment, List<StaffUser> availableDoctors,
-                                        String researchBriefing) {
+                                        String researchBriefing, Map<UUID, Integer> activeLoadByDoctor) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("intake", intakePayload(intake));
         payload.put("urgencyAssessment", assessmentPayload(assessment));
         if (researchBriefing != null && !researchBriefing.isBlank()) {
             payload.put("medicalResearchBriefing", researchBriefing);
         }
+        payload.put("capacityPerDoctor", MAX_ACTIVE_PATIENTS_PER_DOCTOR);
         payload.put("availableDoctors", availableDoctors.stream()
-            .map(this::doctorPayload)
+            .map(doctor -> doctorPayload(doctor, activeLoadByDoctor.getOrDefault(doctor.getId(), 0)))
             .toList());
         return payload;
     }
@@ -106,12 +120,14 @@ public class AiDoctorAssignmentService {
         return assessmentPayload;
     }
 
-    private Map<String, Object> doctorPayload(StaffUser doctor) {
+    private Map<String, Object> doctorPayload(StaffUser doctor, int activePatients) {
         Map<String, Object> doctorPayload = new LinkedHashMap<>();
         doctorPayload.put("staffCode", doctor.getStaffCode());
         doctorPayload.put("displayName", doctor.getDisplayName());
         doctorPayload.put("department", doctor.getDepartment());
         doctorPayload.put("specialty", doctor.getSpecialty());
+        doctorPayload.put("activePatients", activePatients);
+        doctorPayload.put("atCapacity", activePatients >= MAX_ACTIVE_PATIENTS_PER_DOCTOR);
         return doctorPayload;
     }
 

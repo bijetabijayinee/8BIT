@@ -10,6 +10,7 @@ public record BedAllocationResponse(
     boolean filled,
     String patientId,
     String patientDisplayId,
+    String intakeId,
     String chiefComplaint,
     UrgencyCategory urgencyCategory,
     QueueStatus status,

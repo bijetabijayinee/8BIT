@@ -375,6 +375,43 @@ export interface AgentPerformanceResponse {
   pipeline: PipelineObservability;
 }
 
+export interface ResultsTrendPoint {
+  label: string;
+  count: number;
+}
+
+export interface DoctorLoad {
+  name: string;
+  specialty: string | null;
+  patients: number;
+}
+
+export interface TimeSaved {
+  manualTriageMin: number;
+  manualResearchMin: number;
+  manualAssignMin: number;
+  manualMinutesPerPatient: number;
+  aiSecondsPerPatient: number;
+  patients: number;
+  manualMinutesTotal: number;
+  aiMinutesTotal: number;
+  minutesSaved: number;
+  hoursSaved: number;
+}
+
+export interface ResultsAnalytics {
+  patientsProcessed: number;
+  patientsDischarged: number;
+  agentActions: number;
+  researchBriefings: number;
+  researchCoveragePercent: number;
+  dailyThroughput: ResultsTrendPoint[];
+  urgencyMix: ResultsTrendPoint[];
+  departmentMix: ResultsTrendPoint[];
+  doctorLoad: DoctorLoad[];
+  timeSaved: TimeSaved;
+}
+
 export interface HospitalChatMessage {
   id: string;
   authorName: string;
@@ -447,6 +484,7 @@ export interface BedAllocation {
   filled: boolean;
   patientId: string | null;
   patientDisplayId: string | null;
+  intakeId: string | null;
   chiefComplaint: string | null;
   urgencyCategory: UrgencyCategory | null;
   status: QueueStatus | null;
