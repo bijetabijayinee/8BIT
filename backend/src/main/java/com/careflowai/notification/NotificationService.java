@@ -1,6 +1,7 @@
 package com.careflowai.notification;
 
 import com.careflowai.common.StaffRole;
+import com.careflowai.notification.dto.CreateNotificationRequest;
 import com.careflowai.notification.dto.StaffNotificationResponse;
 import com.careflowai.staff.StaffUser;
 import com.careflowai.staff.StaffUserService;
@@ -34,6 +35,36 @@ public class NotificationService {
         notificationRepository.save(new StaffNotification(
             role, recipientStaffId, patientId, patientDisplayId, agent, category, title, body
         ));
+    }
+
+    @Transactional
+    public StaffNotificationResponse create(CreateNotificationRequest request) {
+        if (request == null || !StringUtils.hasText(request.recipientStaffLookup())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A recipient staff member is required.");
+        }
+        if (!StringUtils.hasText(request.title()) || !StringUtils.hasText(request.body())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A title and message are required.");
+        }
+        StaffUser recipient;
+        try {
+            recipient = staffUserService.getByLookup(request.recipientStaffLookup().trim());
+        } catch (Exception unresolved) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recipient staff member not found.");
+        }
+        String category = StringUtils.hasText(request.category()) ? request.category().trim() : "STAFF_MESSAGE";
+        String agent = StringUtils.hasText(request.agent()) ? request.agent().trim() : "Care team";
+        String patientDisplayId = StringUtils.hasText(request.patientDisplayId()) ? request.patientDisplayId().trim() : null;
+        StaffNotification saved = notificationRepository.save(new StaffNotification(
+            recipient.getRole(),
+            recipient.getId(),
+            null,
+            patientDisplayId,
+            agent,
+            category,
+            request.title().trim(),
+            request.body().trim()
+        ));
+        return StaffNotificationResponse.from(saved);
     }
 
     @Transactional(readOnly = true)

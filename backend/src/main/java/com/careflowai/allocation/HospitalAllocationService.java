@@ -97,6 +97,7 @@ public class HospitalAllocationService {
                 null,
                 null,
                 null,
+                null,
                 0
             );
         }
@@ -107,6 +108,7 @@ public class HospitalAllocationService {
             true,
             entry.getPatient().getId().toString(),
             entry.getPatient().getDisplayId(),
+            entry.getIntake().getId().toString(),
             entry.getIntake().getChiefComplaint(),
             entry.getUrgencyCategory(),
             entry.getStatus(),

@@ -13,3 +13,7 @@ ai-service/.venv/
 ai-service/__pycache__/
 ai-service/app/__pycache__/
 ai-service/data/
+
+# Local-only dev tooling - never pushed. Loaded via import.meta.glob in IntakeForm.tsx,
+# which tolerates this file being absent (no build break for anyone who clones the repo).
+frontend/src/features/intake/DevRandomPatientTool.tsx

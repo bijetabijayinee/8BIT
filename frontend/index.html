@@ -4,10 +4,164 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <title>CareFlow AI</title>
+    <style>
+      /* First-paint splash: styled inline so it appears instantly, before the
+         app bundle or global.css load. Removed by main.tsx once React mounts. */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: radial-gradient(120% 120% at 50% 0%, #0b1220 0%, #0f172a 45%, #022c22 100%);
+        color: #e2e8f0;
+        font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        opacity: 1;
+        transition: opacity 480ms ease;
+      }
+      #app-splash.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .cf-mark {
+        position: relative;
+        width: 104px;
+        height: 104px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* rotating conic halo, echoes the Savi orb */
+      .cf-mark::before {
+        content: "";
+        position: absolute;
+        inset: -8px;
+        border-radius: 30px;
+        background: conic-gradient(from 0deg, #38bdf8, #6366f1, #10b981, #38bdf8);
+        filter: blur(9px);
+        opacity: 0.55;
+        animation: cf-spin 3.4s linear infinite;
+      }
+      /* radiating pulse ring */
+      .cf-mark::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 26px;
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.5);
+        animation: cf-ping 1.9s ease-out infinite;
+      }
+      .cf-mark svg {
+        position: relative;
+        width: 92px;
+        height: 92px;
+        border-radius: 24px;
+        box-shadow: 0 18px 45px -12px rgba(16, 185, 129, 0.55);
+        animation: cf-breathe 2.6s ease-in-out infinite;
+      }
+      /* draw the heartbeat line on a loop */
+      .cf-pulse {
+        stroke-dasharray: 120;
+        stroke-dashoffset: 120;
+        animation: cf-draw 2.1s ease-in-out infinite;
+      }
+
+      .cf-word {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        background: linear-gradient(90deg, #7dd3fc, #a5b4fc, #6ee7b7);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .cf-sub {
+        margin-top: -12px;
+        font-size: 12.5px;
+        color: #94a3b8;
+        letter-spacing: 0.02em;
+      }
+      .cf-bar {
+        position: relative;
+        width: 176px;
+        height: 4px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(148, 163, 184, 0.18);
+      }
+      .cf-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 42%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, transparent, #38bdf8, #6366f1, #10b981, transparent);
+        animation: cf-slide 1.35s ease-in-out infinite;
+      }
+
+      @keyframes cf-spin { to { transform: rotate(360deg); } }
+      @keyframes cf-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+      @keyframes cf-ping {
+        0% { transform: scale(1); opacity: 0.6; }
+        80%, 100% { transform: scale(1.35); opacity: 0; }
+      }
+      @keyframes cf-draw {
+        0% { stroke-dashoffset: 120; }
+        55% { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: -120; }
+      }
+      @keyframes cf-slide {
+        0% { transform: translateX(-120%); }
+        100% { transform: translateX(360%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cf-mark::before, .cf-mark::after, .cf-mark svg, .cf-pulse, .cf-bar::after { animation: none; }
+        .cf-pulse { stroke-dashoffset: 0; }
+      }
+    </style>
   </head>
   <body>
+    <div id="app-splash" role="status" aria-label="Loading CareFlow AI">
+      <div class="cf-mark">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="cfSplash" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#38bdf8" />
+              <stop offset="0.5" stop-color="#6366f1" />
+              <stop offset="1" stop-color="#10b981" />
+            </linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="16" fill="#0f172a" />
+          <rect x="3" y="3" width="58" height="58" rx="13" fill="url(#cfSplash)" />
+          <path class="cf-pulse" d="M11 34 H22 L27 21 L33 45 L38 30 L42 34 H53"
+                fill="none" stroke="#ffffff" stroke-width="3.6"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="cf-word">CareFlow AI</div>
+      <div class="cf-sub">Preparing your workspace…</div>
+      <div class="cf-bar" aria-hidden="true"></div>
+    </div>
     <div id="root"></div>
+    <script>
+      // Record when the splash first appeared so we can guarantee a minimum,
+      // non-flashy display time even when the app boots almost instantly.
+      window.__cfSplashStart = Date.now();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

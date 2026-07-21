@@ -1,8 +1,20 @@
-import { Bot, ChevronDown, ClipboardList, Loader2, Send, Sparkles, Trash2, Wand2, X } from 'lucide-react';
+import {
+  Activity,
+  BedDouble,
+  ChevronDown,
+  ClipboardList,
+  Loader2,
+  Send,
+  Stethoscope,
+  Trash2,
+  Wand2,
+  X,
+} from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { sendAiChatMessage } from '../../api/client';
 import { FormattedMessage } from '../../components/FormattedMessage';
 import type { ChatTurn, StaffUser } from '../../types/careflow';
+import { SaviOrb, SaviTypingDots, type SaviState } from './SaviOrb';
 
 interface ChatMessage {
   id: number;
@@ -40,6 +52,24 @@ const actionPrompts = [
   'Escalate the longest waiting patient to high priority',
   'Discharge patients who finished treatment',
 ];
+
+// Always-visible shortcuts under the header so common asks are one tap away,
+// even after the full prompt library collapses.
+const quickChips: Array<{ label: string; prompt: string; icon: typeof Activity }> = [
+  { label: 'Priorities', prompt: 'Which patients need attention first right now?', icon: Activity },
+  { label: 'Beds', prompt: 'What beds are occupied by department?', icon: BedDouble },
+  { label: 'Doctors', prompt: 'Which doctors are assigned and who is still waiting?', icon: Stethoscope },
+  { label: 'Summary', prompt: 'Give me a quick summary of the current queue.', icon: ClipboardList },
+];
+
+const searchingHints = ['find', 'search', 'which', 'who', 'summar', 'research', 'look', 'list', 'beds', 'doctor'];
+
+// Guess whether Savi is reading context (searching) or composing an action (thinking)
+// so the animated orb reflects what she is doing.
+function workingStateFor(message: string): Exclude<SaviState, 'idle' | 'responding'> {
+  const normalized = message.toLowerCase();
+  return searchingHints.some((hint) => normalized.includes(hint)) ? 'searching' : 'thinking';
+}
 
 function loadStoredMessages(): ChatMessage[] {
   try {
@@ -98,6 +128,7 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
   const [isOpen, setIsOpen] = useState(embedded);
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [saviState, setSaviState] = useState<SaviState>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>(loadStoredMessages);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasStaffMessages = messages.some((item) => item.role === 'staff');
@@ -133,6 +164,7 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
     const pendingId = Date.now() + 1;
     setMessage('');
     setIsSending(true);
+    setSaviState(workingStateFor(trimmedMessage));
     setPromptsExpanded(false);
     setMessages((current) => [
       ...current,
@@ -171,6 +203,8 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
       );
     } finally {
       setIsSending(false);
+      setSaviState('responding');
+      window.setTimeout(() => setSaviState('idle'), 1400);
     }
   };
 
@@ -187,22 +221,28 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
   return (
     <div className={embedded ? 'w-full min-w-0' : ''}>
       {isOpen ? (
-        <section className={`flex min-w-0 flex-col overflow-hidden rounded-lg border border-sky-200 bg-white shadow-2xl ${embedded ? 'h-[34rem] w-full' : 'h-[30rem] w-[24rem] max-w-[calc(100vw-2.5rem)]'}`}>
-          <header className="flex shrink-0 items-center justify-between border-b border-sky-100 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-950 text-white">
-                <Bot size={17} aria-hidden="true" />
-              </span>
+        <section className={`flex min-w-0 flex-col overflow-hidden rounded-2xl border border-sky-200/70 bg-white shadow-2xl ${embedded ? 'h-[38rem] w-full' : 'h-[33rem] w-[26rem] max-w-[calc(100vw-2.5rem)]'}`}>
+          <header className="relative flex shrink-0 items-center justify-between overflow-hidden border-b border-white/10 bg-slate-950 px-4 py-3 text-white">
+            <div className="animate-savi-gradient pointer-events-none absolute inset-0 bg-[linear-gradient(120deg,rgba(56,189,248,0.25),rgba(99,102,241,0.18),rgba(16,185,129,0.22))]" aria-hidden="true" />
+            <div className="relative flex min-w-0 items-center gap-2.5">
+              <SaviOrb state={saviState} size={38} />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-950">Savi - Healthcare AI Agent</p>
-                <p className="text-xs text-slate-500">Live hospital context - takes real queue actions</p>
+                <p className="text-sm font-semibold">Savi</p>
+                <p className="flex items-center gap-1.5 text-[11px] text-sky-100/80">
+                  <span className={`h-1.5 w-1.5 rounded-full ${isSending ? 'animate-pulse bg-amber-300' : 'bg-emerald-400'}`} />
+                  {isSending
+                    ? saviState === 'searching'
+                      ? 'Searching live context...'
+                      : 'Thinking...'
+                    : 'Online - takes real queue actions'}
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="relative flex items-center gap-1">
               <button
                 type="button"
                 onClick={clearChat}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-sky-50 hover:text-slate-950"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-sky-100/80 transition hover:bg-white/10 hover:text-white"
                 aria-label="Clear chat history"
                 title="Clear chat history"
               >
@@ -212,7 +252,7 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-sky-50 hover:text-slate-950"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-sky-100/80 transition hover:bg-white/10 hover:text-white"
                   aria-label="Close AI chat"
                 >
                   <X size={16} aria-hidden="true" />
@@ -220,6 +260,21 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
               )}
             </div>
           </header>
+
+          <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-slate-100 bg-slate-50/70 px-3 py-2 scrollbar-hide">
+            {quickChips.map(({ label, prompt, icon: Icon }) => (
+              <button
+                key={label}
+                type="button"
+                disabled={isSending}
+                onClick={() => void sendMessage(prompt)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Icon size={13} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
 
           <div ref={scrollRef} className="scrollbar-hide min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
             {/* Example prompts stay pinned above the conversation; once a chat has
@@ -278,21 +333,33 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
             </div>
 
             {messages.map((item) => (
-              <div
-                key={item.id}
-                className={`animate-message-in max-w-full rounded-lg px-3 py-2 text-sm ${
-                  item.role === 'staff'
-                    ? 'ml-8 bg-slate-950 text-white'
-                    : 'mr-8 border border-emerald-100 bg-emerald-50 text-slate-800'
-                }`}
-              >
-                {item.role === 'assistant' ? <FormattedMessage text={item.text} /> : <PlainMessage text={item.text} />}
+              <div key={item.id} className={`flex items-end gap-2 ${item.role === 'staff' ? 'flex-row-reverse' : ''}`}>
                 {item.role === 'assistant' ? (
-                  <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal opacity-60">
-                    {item.isPending ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : null}
-                    {item.isPending ? 'Working' : item.aiBacked ? 'LLM context answer' : 'Workflow fallback'}
-                  </p>
+                  <span className="mb-0.5 shrink-0">
+                    <SaviOrb size={22} />
+                  </span>
                 ) : null}
+                <div
+                  className={`animate-message-in max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] shadow-sm ${
+                    item.role === 'staff'
+                      ? 'rounded-br-md bg-gradient-to-br from-slate-800 to-slate-950 text-white'
+                      : 'rounded-bl-md border border-emerald-100 bg-emerald-50/80 text-slate-800'
+                  }`}
+                >
+                  {item.role === 'assistant' ? <FormattedMessage text={item.text} /> : <PlainMessage text={item.text} />}
+                  {item.role === 'assistant' ? (
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal opacity-60">
+                      {item.isPending ? <SaviTypingDots /> : null}
+                      {item.isPending
+                        ? saviState === 'searching'
+                          ? 'Searching context'
+                          : 'Working'
+                        : item.aiBacked
+                          ? 'LLM context answer'
+                          : 'Workflow fallback'}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>
@@ -321,11 +388,11 @@ export function AiAgentChat({ activeStaff, onAction, embedded = false }: AiAgent
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="flex h-12 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-medium text-white shadow-2xl transition hover:scale-105"
+          className="flex h-12 items-center gap-2 rounded-full bg-slate-950 py-1 pl-1.5 pr-4 text-sm font-medium text-white shadow-2xl transition hover:scale-105"
           aria-label="Open AI agent chat"
         >
-          <Sparkles size={18} aria-hidden="true" />
-          Savi
+          <SaviOrb size={36} />
+          Ask Savi
         </button>
       )}
     </div>

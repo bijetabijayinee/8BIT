@@ -5,6 +5,10 @@ import type { StaffNotification, StaffUser } from '../../types/careflow';
 
 interface NotificationsPanelProps {
   activeStaff: StaffUser | null;
+  /** Reports the current unread count upward (e.g. for a dock bell badge). */
+  onUnreadChange?: (count: number) => void;
+  /** 'panel' is the standalone card; 'dropdown' is the compact dock variant. */
+  variant?: 'panel' | 'dropdown';
 }
 
 const categoryIcon: Record<string, ReactNode> = {
@@ -26,7 +30,7 @@ function relativeTime(value: string) {
   return `${hours}h ${minutes % 60}m ago`;
 }
 
-export function NotificationsPanel({ activeStaff }: NotificationsPanelProps) {
+export function NotificationsPanel({ activeStaff, onUnreadChange, variant = 'panel' }: NotificationsPanelProps) {
   const [notifications, setNotifications] = useState<StaffNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
@@ -58,6 +62,10 @@ export function NotificationsPanel({ activeStaff }: NotificationsPanelProps) {
 
   const unreadCount = notifications.filter((item) => !item.read).length;
 
+  useEffect(() => {
+    onUnreadChange?.(unreadCount);
+  }, [unreadCount, onUnreadChange]);
+
   const handleMarkRead = async (notification: StaffNotification) => {
     if (notification.read) {
       return;
@@ -86,7 +94,13 @@ export function NotificationsPanel({ activeStaff }: NotificationsPanelProps) {
   };
 
   return (
-    <section className="flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section
+      className={`flex min-w-0 flex-col border-slate-200 bg-white ${
+        variant === 'dropdown'
+          ? 'h-[30rem] w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-2xl border p-4 shadow-2xl'
+          : 'h-full rounded-xl border p-5 shadow-sm'
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className="relative flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-white">

@@ -14,6 +14,7 @@ import type {
   PatientReportResponse,
   PatientStory,
   QueueMetrics,
+  ResultsAnalytics,
   QueueEntry,
   QueueFilters,
   SaveStaffUserRequest,
@@ -26,6 +27,7 @@ import type {
   ThreadComment,
   UpdatePlacementRequest,
   UpdateQueueStatusRequest,
+  WeatherResponse,
 } from '../types/careflow';
 
 import { getToken, handleSessionExpired } from './auth';
@@ -142,8 +144,15 @@ export function createIntake(request: CreateIntakeRequest) {
   });
 }
 
-export async function getNextPatientDisplayId() {
-  const response = await apiRequest<{ patientDisplayId: string }>('/api/intakes/next-patient-display-id');
+export async function getNextPatientDisplayId(department?: string) {
+  const params = new URLSearchParams();
+  if (department?.trim()) {
+    params.set('department', department.trim());
+  }
+  const query = params.toString();
+  const response = await apiRequest<{ patientDisplayId: string }>(
+    `/api/intakes/next-patient-display-id${query ? `?${query}` : ''}`,
+  );
   return response.patientDisplayId;
 }
 
@@ -329,6 +338,10 @@ export function getAgentPerformance() {
   return apiRequest<AgentPerformanceResponse>('/api/agent/performance');
 }
 
+export function getResultsAnalytics() {
+  return apiRequest<ResultsAnalytics>('/api/analytics/results');
+}
+
 export function getNotifications(role?: StaffRole, staffLookup?: string) {
   const params = new URLSearchParams();
   if (role) {
@@ -339,6 +352,20 @@ export function getNotifications(role?: StaffRole, staffLookup?: string) {
   }
   const query = params.toString();
   return apiRequest<StaffNotification[]>(`/api/notifications${query ? `?${query}` : ''}`);
+}
+
+export function createNotification(request: {
+  recipientStaffLookup: string;
+  patientDisplayId?: string;
+  category?: string;
+  title: string;
+  body: string;
+  agent?: string;
+}) {
+  return apiRequest<StaffNotification>('/api/notifications', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 export function markNotificationRead(notificationId: string) {
@@ -401,4 +428,11 @@ export function sendHospitalChatMessage(request: { authorName: string; authorRol
     body: JSON.stringify(request),
     timeoutMs: 45000,
   });
+}
+
+// Proxied server-side so the browser never contacts a third-party weather domain
+// directly - keeps the app's entire client-visible network footprint on one origin.
+export function getWeather(latitude: number, longitude: number) {
+  const params = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude) });
+  return apiRequest<WeatherResponse>(`/api/weather?${params.toString()}`);
 }

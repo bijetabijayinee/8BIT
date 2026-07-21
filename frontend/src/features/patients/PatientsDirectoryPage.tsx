@@ -2,8 +2,12 @@ import {
   BookOpenText,
   Bot,
   BrainCircuit,
+  ChevronRight,
   FolderOpen,
   Globe,
+  LayoutGrid,
+  ListTree,
+  Network,
   Paperclip,
   RefreshCw,
   Search,
@@ -32,6 +36,28 @@ const statusBadge: Record<QueueStatus, string> = {
   LEFT_WITHOUT_BEING_SEEN: 'bg-rose-50 text-rose-800 ring-rose-200',
 };
 
+const urgencyDot: Record<UrgencyCategory, string> = {
+  CRITICAL: 'bg-rose-500',
+  HIGH: 'bg-amber-500',
+  MEDIUM: 'bg-sky-500',
+  LOW: 'bg-emerald-500',
+};
+
+const urgencyFill: Record<UrgencyCategory, string> = {
+  CRITICAL: 'fill-rose-500',
+  HIGH: 'fill-amber-500',
+  MEDIUM: 'fill-sky-500',
+  LOW: 'fill-emerald-500',
+};
+
+type PatientView = 'cards' | 'tree' | 'graph';
+
+const UNASSIGNED = 'Unassigned';
+
+// Module-level cache so re-entering the Patients route paints instantly and the network
+// fetch runs in the background (stale-while-revalidate) instead of a blocking spinner.
+let directoryCache: PatientDirectoryEntry[] | null = null;
+
 function formatEnumLabel(value: string) {
   return value
     .split('_')
@@ -39,10 +65,34 @@ function formatEnumLabel(value: string) {
     .join(' ');
 }
 
+function doctorKey(patient: PatientDirectoryEntry) {
+  return patient.assignedDoctor?.trim() || UNASSIGNED;
+}
+
+function groupByDoctor(patients: PatientDirectoryEntry[]) {
+  const map = new Map<string, PatientDirectoryEntry[]>();
+  patients.forEach((patient) => {
+    const key = doctorKey(patient);
+    const bucket = map.get(key) ?? [];
+    bucket.push(patient);
+    map.set(key, bucket);
+  });
+  return Array.from(map.entries())
+    .map(([doctor, entries]) => ({ doctor, entries }))
+    .sort((first, second) => {
+      // Real doctors first, Unassigned last, then by size.
+      if (first.doctor === UNASSIGNED) return 1;
+      if (second.doctor === UNASSIGNED) return -1;
+      return second.entries.length - first.entries.length || first.doctor.localeCompare(second.doctor);
+    });
+}
+
 export function PatientsDirectoryPage() {
-  const [patients, setPatients] = useState<PatientDirectoryEntry[]>([]);
-  const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
+  const [patients, setPatients] = useState<PatientDirectoryEntry[]>(() => directoryCache ?? []);
+  const [isDirectoryLoading, setIsDirectoryLoading] = useState(directoryCache === null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [patientSearch, setPatientSearch] = useState('');
+  const [view, setView] = useState<PatientView>('cards');
   const [storyPatientId, setStoryPatientId] = useState<string | null>(null);
   const [story, setStory] = useState<PatientStory | null>(null);
   const [isStoryLoading, setIsStoryLoading] = useState(false);
@@ -68,19 +118,29 @@ export function PatientsDirectoryPage() {
     setStoryError(null);
   }, []);
 
-  const loadDirectory = useCallback(async () => {
-    setIsDirectoryLoading(true);
+  const loadDirectory = useCallback(async (silent = false) => {
+    if (silent) {
+      setIsRefreshing(true);
+    } else {
+      setIsDirectoryLoading(true);
+    }
     try {
-      setPatients(await getPatientDirectory());
+      const data = await getPatientDirectory();
+      directoryCache = data;
+      setPatients(data);
     } catch {
-      setPatients([]);
+      if (directoryCache === null) {
+        setPatients([]);
+      }
     } finally {
       setIsDirectoryLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadDirectory();
+    // Revalidate silently when we already have a cached snapshot to show.
+    void loadDirectory(directoryCache !== null);
   }, [loadDirectory]);
 
   const visiblePatients = useMemo(() => {
@@ -100,6 +160,12 @@ export function PatientsDirectoryPage() {
     );
   }, [patientSearch, patients]);
 
+  const viewOptions: Array<{ value: PatientView; label: string; icon: typeof LayoutGrid }> = [
+    { value: 'cards', label: 'Cards', icon: LayoutGrid },
+    { value: 'tree', label: 'Tree', icon: ListTree },
+    { value: 'graph', label: 'Graph', icon: Network },
+  ];
+
   return (
     <section className="py-6">
       <div className="flex flex-col gap-4 border-b border-sky-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
@@ -115,8 +181,27 @@ export function PatientsDirectoryPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="flex h-10 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 shadow-sm sm:w-72">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
+            {viewOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setView(option.value)}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded px-2.5 text-sm font-medium transition ${
+                    view === option.value ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                  aria-pressed={view === option.value}
+                >
+                  <Icon size={15} aria-hidden="true" />
+                  <span className="hidden sm:inline">{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex h-10 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 shadow-sm sm:w-64">
             <Search size={15} className="shrink-0 text-emerald-700" aria-hidden="true" />
             <input
               value={patientSearch}
@@ -127,10 +212,10 @@ export function PatientsDirectoryPage() {
           </label>
           <button
             type="button"
-            onClick={() => void loadDirectory()}
+            onClick={() => void loadDirectory(true)}
             className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-sky-200 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-sky-50"
           >
-            <RefreshCw size={16} className={isDirectoryLoading ? 'animate-spin' : ''} aria-hidden="true" />
+            <RefreshCw size={16} className={isDirectoryLoading || isRefreshing ? 'animate-spin' : ''} aria-hidden="true" />
             Refresh
           </button>
         </div>
@@ -147,85 +232,12 @@ export function PatientsDirectoryPage() {
           <p className="rounded-md bg-sky-50 p-4 text-sm text-slate-500">
             {patients.length === 0 ? 'No patients recorded yet.' : 'No patients match this search.'}
           </p>
+        ) : view === 'cards' ? (
+          <PatientCardsView patients={visiblePatients} onOpenStory={openStory} />
+        ) : view === 'tree' ? (
+          <PatientTreeView patients={visiblePatients} onOpenStory={openStory} />
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {visiblePatients.map((patient) => (
-              <article key={patient.patientId} className="flex min-w-0 flex-col rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Avatar name={patient.patientDisplayId} kind="patient" size="sm" />
-                    <p className="truncate text-sm font-semibold text-slate-950">{patient.patientDisplayId}</p>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    {patient.urgencyCategory ? (
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${urgencyBadge[patient.urgencyCategory]}`}>
-                        {formatEnumLabel(patient.urgencyCategory)}{patient.urgencyScore != null ? ` ${patient.urgencyScore}` : ''}
-                      </span>
-                    ) : null}
-                    {patient.currentStatus ? (
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${statusBadge[patient.currentStatus]}`}>
-                        {formatEnumLabel(patient.currentStatus)}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">
-                  {patient.chiefComplaint ?? 'No intake recorded.'}
-                </p>
-
-                <div className="mt-2 grid gap-1 text-xs text-slate-500">
-                  <span>
-                    {formatEnumLabel(patient.ageBand)} - {patient.department ?? 'No department'}
-                    {patient.arrivedAt ? ` - ${new Date(patient.arrivedAt).toLocaleString()}` : ''}
-                  </span>
-                  {patient.assignedDoctor ? (
-                    <span className="inline-flex items-center gap-1.5 text-emerald-800">
-                      <Stethoscope size={12} aria-hidden="true" />
-                      {patient.assignedDoctor}
-                    </span>
-                  ) : null}
-                  {patient.suggestedDiagnosis ? (
-                    <span className="line-clamp-2 text-slate-600">Dx: {patient.suggestedDiagnosis}</span>
-                  ) : null}
-                </div>
-
-                <div className="mt-auto pt-3">
-                  <button
-                    type="button"
-                    onClick={() => void openStory(patient.patientId)}
-                    className="mb-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white transition hover:bg-slate-800"
-                  >
-                    <BookOpenText size={13} aria-hidden="true" />
-                    View diagnosis & agent story
-                  </button>
-                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-normal text-slate-500">
-                    <FolderOpen size={12} aria-hidden="true" />
-                    Files ({patient.files.length})
-                  </p>
-                  {patient.files.length === 0 ? (
-                    <p className="mt-1 text-xs text-slate-400">No files attached.</p>
-                  ) : (
-                    <div className="scrollbar-hide mt-1 max-h-20 space-y-1 overflow-y-auto">
-                      {patient.files.map((patientFile, index) => (
-                        <a
-                          key={`${patientFile.url}-${index}`}
-                          href={patientFile.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex min-w-0 items-center gap-1.5 rounded bg-slate-50 px-2 py-1 text-xs text-sky-800 ring-1 ring-inset ring-sky-100 transition hover:bg-sky-50"
-                        >
-                          <Paperclip size={11} className="shrink-0" aria-hidden="true" />
-                          <span className="truncate">{patientFile.fileName}</span>
-                          <span className="ml-auto shrink-0 text-[10px] text-slate-400">{patientFile.uploadedBy}</span>
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+          <PatientGraphView patients={visiblePatients} onOpenStory={openStory} />
         )}
       </div>
 
@@ -233,6 +245,258 @@ export function PatientsDirectoryPage() {
         <PatientStoryModal story={story} isLoading={isStoryLoading} error={storyError} onClose={closeStory} />
       ) : null}
     </section>
+  );
+}
+
+interface PatientViewProps {
+  patients: PatientDirectoryEntry[];
+  onOpenStory: (patientId: string) => void;
+}
+
+function PatientCardsView({ patients, onOpenStory }: PatientViewProps) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {patients.map((patient) => (
+        <article key={patient.patientId} className="flex min-w-0 flex-col rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Avatar name={patient.patientDisplayId} kind="patient" size="sm" />
+              <p className="truncate text-sm font-semibold text-slate-950">{patient.patientDisplayId}</p>
+            </div>
+            <div className="flex shrink-0 gap-1.5">
+              {patient.urgencyCategory ? (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${urgencyBadge[patient.urgencyCategory]}`}>
+                  {formatEnumLabel(patient.urgencyCategory)}{patient.urgencyScore != null ? ` ${patient.urgencyScore}` : ''}
+                </span>
+              ) : null}
+              {patient.currentStatus ? (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${statusBadge[patient.currentStatus]}`}>
+                  {formatEnumLabel(patient.currentStatus)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">
+            {patient.chiefComplaint ?? 'No intake recorded.'}
+          </p>
+
+          <div className="mt-2 grid gap-1 text-xs text-slate-500">
+            <span>
+              {formatEnumLabel(patient.ageBand)} - {patient.department ?? 'No department'}
+              {patient.arrivedAt ? ` - ${new Date(patient.arrivedAt).toLocaleString()}` : ''}
+            </span>
+            {patient.assignedDoctor ? (
+              <span className="inline-flex items-center gap-1.5 text-emerald-800">
+                <Stethoscope size={12} aria-hidden="true" />
+                {patient.assignedDoctor}
+              </span>
+            ) : null}
+            {patient.suggestedDiagnosis ? (
+              <span className="line-clamp-2 text-slate-600">Dx: {patient.suggestedDiagnosis}</span>
+            ) : null}
+          </div>
+
+          <div className="mt-auto pt-3">
+            <button
+              type="button"
+              onClick={() => onOpenStory(patient.patientId)}
+              className="mb-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+            >
+              <BookOpenText size={13} aria-hidden="true" />
+              View diagnosis & agent story
+            </button>
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-normal text-slate-500">
+              <FolderOpen size={12} aria-hidden="true" />
+              Files ({patient.files.length})
+            </p>
+            {patient.files.length === 0 ? (
+              <p className="mt-1 text-xs text-slate-400">No files attached.</p>
+            ) : (
+              <div className="scrollbar-hide mt-1 max-h-20 space-y-1 overflow-y-auto">
+                {patient.files.map((patientFile, index) => (
+                  <a
+                    key={`${patientFile.url}-${index}`}
+                    href={patientFile.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex min-w-0 items-center gap-1.5 rounded bg-slate-50 px-2 py-1 text-xs text-sky-800 ring-1 ring-inset ring-sky-100 transition hover:bg-sky-50"
+                  >
+                    <Paperclip size={11} className="shrink-0" aria-hidden="true" />
+                    <span className="truncate">{patientFile.fileName}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-slate-400">{patientFile.uploadedBy}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function PatientTreeView({ patients, onOpenStory }: PatientViewProps) {
+  const groups = useMemo(() => groupByDoctor(patients), [patients]);
+
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => (
+        <DoctorTreeGroup key={group.doctor} doctor={group.doctor} entries={group.entries} onOpenStory={onOpenStory} />
+      ))}
+    </div>
+  );
+}
+
+function DoctorTreeGroup({
+  doctor,
+  entries,
+  onOpenStory,
+}: {
+  doctor: string;
+  entries: PatientDirectoryEntry[];
+  onOpenStory: (patientId: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  const isUnassigned = doctor === UNASSIGNED;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+        aria-expanded={isOpen}
+      >
+        <ChevronRight size={16} aria-hidden="true" className={`shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${isUnassigned ? 'bg-slate-100 text-slate-500' : 'bg-emerald-600 text-white'}`}>
+          <Stethoscope size={16} aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-slate-950">{doctor}</p>
+          <p className="text-[11px] text-slate-500">{entries.length} patient{entries.length === 1 ? '' : 's'}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{entries.length}</span>
+      </button>
+
+      {isOpen ? (
+        <div className="space-y-1.5 border-t border-slate-100 px-3 pb-3 pt-2">
+          {entries.map((patient) => (
+            <button
+              key={patient.patientId}
+              type="button"
+              onClick={() => onOpenStory(patient.patientId)}
+              className="ml-2 flex w-[calc(100%-0.5rem)] items-center gap-2.5 border-l-2 border-slate-200 py-1.5 pl-3 text-left transition hover:border-emerald-400"
+            >
+              <span className={`h-2 w-2 shrink-0 rounded-full ${patient.urgencyCategory ? urgencyDot[patient.urgencyCategory] : 'bg-slate-300'}`} aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-900">{patient.patientDisplayId}</span>
+                <span className="block truncate text-xs text-slate-500">{patient.chiefComplaint ?? 'No intake recorded.'}</span>
+              </span>
+              {patient.currentStatus ? (
+                <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset sm:inline ${statusBadge[patient.currentStatus]}`}>
+                  {formatEnumLabel(patient.currentStatus)}
+                </span>
+              ) : null}
+              <ChevronRight size={14} className="shrink-0 text-slate-400" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PatientGraphView({ patients, onOpenStory }: PatientViewProps) {
+  const groups = useMemo(() => groupByDoctor(patients), [patients]);
+
+  return (
+    <>
+      <p className="mb-3 text-xs text-slate-500">
+        Each hub is a doctor (or unassigned pool); the orbiting nodes are their patients. Click any node to open its story.
+      </p>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {groups.map((group) => (
+          <DoctorCluster key={group.doctor} doctor={group.doctor} entries={group.entries} onOpenStory={onOpenStory} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function DoctorCluster({
+  doctor,
+  entries,
+  onOpenStory,
+}: {
+  doctor: string;
+  entries: PatientDirectoryEntry[];
+  onOpenStory: (patientId: string) => void;
+}) {
+  const size = 260;
+  const center = size / 2;
+  const radius = entries.length <= 1 ? 0 : Math.min(96, 52 + entries.length * 6);
+  const isUnassigned = doctor === UNASSIGNED;
+
+  const nodes = entries.map((patient, index) => {
+    const angle = (index / entries.length) * Math.PI * 2 - Math.PI / 2;
+    return {
+      patient,
+      x: center + Math.cos(angle) * radius,
+      y: center + Math.sin(angle) * radius,
+    };
+  });
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-1 flex items-center gap-2">
+        <span className={`flex h-7 w-7 items-center justify-center rounded-md ${isUnassigned ? 'bg-slate-100 text-slate-500' : 'bg-emerald-600 text-white'}`}>
+          <Stethoscope size={14} aria-hidden="true" />
+        </span>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-950">{doctor}</p>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{entries.length}</span>
+      </div>
+      <svg viewBox={`0 0 ${size} ${size}`} className="h-auto w-full" role="img" aria-label={`Patient cluster for ${doctor}`}>
+        {nodes.map((node) => (
+          <line
+            key={`edge-${node.patient.patientId}`}
+            x1={center}
+            y1={center}
+            x2={node.x}
+            y2={node.y}
+            className="stroke-slate-200"
+            strokeWidth={1.5}
+          />
+        ))}
+
+        {/* hub */}
+        <circle cx={center} cy={center} r={22} className={isUnassigned ? 'fill-slate-200' : 'fill-emerald-500'} />
+        <text x={center} y={center + 4} textAnchor="middle" className="fill-white text-[10px] font-bold">
+          {isUnassigned ? '—' : doctor.replace(/^Dr\.?\s+/i, '').slice(0, 2).toUpperCase()}
+        </text>
+
+        {nodes.map((node) => (
+          <g
+            key={node.patient.patientId}
+            className="cursor-pointer"
+            onClick={() => onOpenStory(node.patient.patientId)}
+          >
+            <title>{`${node.patient.patientDisplayId} - ${node.patient.chiefComplaint ?? 'No intake'}`}</title>
+            <circle
+              cx={node.x}
+              cy={node.y}
+              r={14}
+              className={node.patient.urgencyCategory ? urgencyFill[node.patient.urgencyCategory] : 'fill-slate-300'}
+              stroke="white"
+              strokeWidth={2}
+            />
+            <text x={node.x} y={node.y + 3} textAnchor="middle" className="pointer-events-none fill-white text-[8px] font-bold">
+              {node.patient.patientDisplayId.replace(/[^0-9]/g, '').slice(-3) || node.patient.patientDisplayId.slice(-3)}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 

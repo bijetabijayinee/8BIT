@@ -7,7 +7,7 @@ decision is explained, streamed live to staff, and kept for audit.
 
 > 🏆 Built for the **OpenAI Agentic AI Hackathon**.
 >
-> 👤 **Author:** Chandan Pandey
+> 👤 **Author:** Team 8 Bit 
 
 📐 Deep dive: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · API reference: [docs/API.md](docs/API.md)
 

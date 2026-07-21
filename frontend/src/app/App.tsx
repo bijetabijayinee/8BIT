@@ -1,4 +1,5 @@
 import {
+  Activity,
   BedDouble,
   CalendarDays,
   ClipboardPlus,
@@ -17,17 +18,19 @@ import {
   ContactRound,
   MessageSquareText,
   Search,
+  ShieldAlert,
+  Stethoscope,
+  TrendingUp,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 import { type PointerEvent, useCallback, useEffect, useState } from 'react';
-import { getDepartments } from '../api/client';
+import { getDepartments, getHospitalAllocation, getQueueMetrics } from '../api/client';
 import { getSession, login, logout, type AuthSession } from '../api/auth';
 import { LoginShowcase } from './LoginShowcase';
 import { Toaster } from '../components/toast';
 import { AiAgentChat, AiChatPage } from '../features/ai-chat';
 import { ChatDock } from '../features/ai-chat/ChatDock';
-import { NotificationsPanel } from '../features/notifications/NotificationsPanel';
 import { AllocationDashboard } from '../features/allocation';
 import { AppointmentsCalendar } from '../features/calendar/AppointmentsCalendar';
 import { PatientsDirectoryPage } from '../features/patients';
@@ -36,9 +39,17 @@ import { KnowledgePage } from '../features/knowledge/KnowledgePage';
 import { MetricsDashboard } from '../features/metrics';
 import { PeopleDirectory } from '../features/people';
 import { QueueTable } from '../features/queue';
-import type { Appointment, StaffRole, StaffUser } from '../types/careflow';
+import { WaitingRoomQueue } from '../features/queue/WaitingRoomQueue';
+import { ResultsDashboard } from '../features/results/ResultsDashboard';
+import type {
+  Appointment,
+  HospitalAllocation,
+  QueueMetrics,
+  StaffRole,
+  StaffUser,
+} from '../types/careflow';
 
-type WorkspaceRoute = 'home' | 'queue' | 'patients' | 'intake' | 'allocation' | 'dashboard' | 'people' | 'knowledge' | 'calendar';
+type WorkspaceRoute = 'home' | 'queue' | 'patients' | 'intake' | 'allocation' | 'dashboard' | 'results' | 'people' | 'knowledge' | 'calendar';
 
 const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: LucideIcon }> = [
   { route: 'home', label: 'Home', icon: Home },
@@ -47,6 +58,7 @@ const navigationItems: Array<{ route: WorkspaceRoute; label: string; icon: Lucid
   { route: 'intake', label: 'Intake', icon: ClipboardPlus },
   { route: 'allocation', label: 'Allocation', icon: BedDouble },
   { route: 'dashboard', label: 'Dashboard', icon: Gauge },
+  { route: 'results', label: 'Results', icon: TrendingUp },
   { route: 'people', label: 'People', icon: UsersRound },
   { route: 'knowledge', label: 'Knowledge', icon: FileUp },
   { route: 'calendar', label: 'Calendar', icon: CalendarDays },
@@ -68,6 +80,7 @@ function routeFromHash(): WorkspaceRoute {
     hash === 'home' ||
     hash === 'intake' ||
     hash === 'dashboard' ||
+    hash === 'results' ||
     hash === 'queue' ||
     hash === 'people' ||
     hash === 'patients' ||
@@ -207,7 +220,7 @@ function WorkspaceApp() {
 
   return (
     <main className="min-h-screen bg-slate-100 font-sans text-slate-950 transition-colors">
-      <div className="flex min-h-screen">
+      <div className="flex min-h-screen pt-12">
         <aside
           className="relative hidden shrink-0 border-r border-slate-200 bg-white p-4 shadow-sm lg:block"
           style={{ width: navWidth }}
@@ -280,8 +293,8 @@ function WorkspaceApp() {
           </button>
         </aside>
 
-        <section className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+        <section className="paper-texture flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-12 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-white">
@@ -319,7 +332,7 @@ function WorkspaceApp() {
             </button>
           </header>
 
-          <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
             {activeRoute === 'home' ? (
               <HomeWorkspace activeStaff={activeStaff} onAction={handleAiAction} onNavigate={navigate} />
             ) : null}
@@ -336,8 +349,9 @@ function WorkspaceApp() {
               <IntakeForm departments={departments} activeStaff={activeStaff} onCreated={refreshOperationalViews} />
             ) : null}
             {activeRoute === 'patients' ? <PatientsDirectoryPage /> : null}
-            {activeRoute === 'allocation' ? <AllocationDashboard /> : null}
+            {activeRoute === 'allocation' ? <AllocationDashboard activeStaff={activeStaff} /> : null}
             {activeRoute === 'dashboard' ? <MetricsDashboard refreshSignal={metricsRefreshKey} /> : null}
+            {activeRoute === 'results' ? <ResultsDashboard /> : null}
             {activeRoute === 'people' ? <PeopleDirectory departments={departments} /> : null}
             {activeRoute === 'knowledge' ? <KnowledgePage /> : null}
             {activeRoute === 'calendar' ? <AppointmentsCalendar appointments={appointments} /> : null}
@@ -345,7 +359,13 @@ function WorkspaceApp() {
         </section>
       </div>
 
-      <ChatDock activeStaff={activeStaff} onAction={handleAiAction} />
+      <ChatDock
+        activeStaff={activeStaff}
+        onAction={handleAiAction}
+        onLogout={handleLogout}
+        onNavigate={navigate}
+        marqueeRefreshSignal={queueRefreshKey}
+      />
       <Toaster />
     </main>
   );
@@ -505,8 +525,8 @@ function HomeWorkspace({
   ];
 
   return (
-    <section aria-labelledby="home-title" className="space-y-6 py-6">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-lg sm:p-8">
+    <section aria-labelledby="home-title" className="space-y-5">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 p-5 text-white shadow-lg sm:p-6">
         <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
         <div className="pointer-events-none absolute -bottom-20 left-1/3 h-56 w-56 rounded-full bg-sky-500/10 blur-3xl" aria-hidden="true" />
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
@@ -515,14 +535,14 @@ function HomeWorkspace({
               <span className="h-1.5 w-1.5 animate-soft-pulse rounded-full bg-emerald-400" />
               Autonomous care operations
             </span>
-            <h2 id="home-title" className="mt-4 text-2xl font-semibold tracking-tight sm:text-4xl">
+            <h2 id="home-title" className="mt-3 text-2xl font-semibold tracking-tight sm:text-4xl">
               Welcome back, {activeStaff.displayName}
             </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
               CareFlow's agents triage every arrival, sort the queue, assign the right doctor, notify the care team,
               and research the condition - so your team acts faster under pressure.
             </p>
-            <div className="mt-5 flex flex-wrap gap-2 text-xs font-medium">
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-inset ring-white/15">
                 <UsersRound size={13} aria-hidden="true" />
                 {activeStaff.displayName} - {activeStaff.staffCode}
@@ -537,7 +557,7 @@ function HomeWorkspace({
           </span>
         </div>
 
-        <div className="relative mt-6 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="relative mt-5 grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
           {quickLinks.map((item) => (
             <button
               key={item.route}
@@ -552,14 +572,68 @@ function HomeWorkspace({
         </div>
       </div>
 
-      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <div className="min-w-0">
-          <AiAgentChat activeStaff={activeStaff} onAction={onAction} embedded />
-        </div>
-        <div className="min-h-[34rem]">
-          <NotificationsPanel activeStaff={activeStaff} />
-        </div>
+      <HomeStats onNavigate={onNavigate} />
+
+      <WaitingRoomQueue onNavigate={onNavigate} activeStaff={activeStaff} />
+
+      <div className="min-w-0">
+        <AiAgentChat activeStaff={activeStaff} onAction={onAction} embedded />
       </div>
     </section>
   );
 }
+
+function HomeStats({ onNavigate }: { onNavigate: (route: WorkspaceRoute) => void }) {
+  const [metrics, setMetrics] = useState<QueueMetrics | null>(null);
+  const [allocation, setAllocation] = useState<HospitalAllocation | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const [metricsResult, allocationResult] = await Promise.all([getQueueMetrics(), getHospitalAllocation()]);
+        if (mounted) {
+          setMetrics(metricsResult);
+          setAllocation(allocationResult);
+        }
+      } catch {
+        // leave tiles in their loading/empty state on failure
+      }
+    };
+    void load();
+    const intervalId = window.setInterval(load, 20_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const tiles: Array<{ label: string; value: number | string; icon: LucideIcon; accent: string; route: WorkspaceRoute }> = [
+    { label: 'In queue', value: metrics?.currentQueueSize ?? '-', icon: Activity, accent: 'text-sky-700', route: 'queue' },
+    { label: 'Critical / high waiting', value: metrics?.criticalAndHighWaiting ?? '-', icon: ShieldAlert, accent: 'text-rose-600', route: 'queue' },
+    { label: 'Beds available', value: allocation?.summary.vacantBeds ?? '-', icon: BedDouble, accent: 'text-emerald-700', route: 'allocation' },
+    { label: 'Doctors free', value: allocation?.summary.vacantDoctors ?? '-', icon: Stethoscope, accent: 'text-indigo-700', route: 'allocation' },
+  ];
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {tiles.map((tile) => (
+        <button
+          key={tile.label}
+          type="button"
+          onClick={() => onNavigate(tile.route)}
+          className="group flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-md"
+        >
+          <div>
+            <p className="text-xs font-medium text-slate-500">{tile.label}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-950">{tile.value}</p>
+          </div>
+          <span className={`flex h-11 w-11 items-center justify-center rounded-xl bg-slate-50 ${tile.accent} ring-1 ring-inset ring-slate-100`}>
+            <tile.icon size={20} aria-hidden="true" />
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+

@@ -12,6 +12,18 @@ export default {
           low: '#027a48',
         },
       },
+      fontFamily: {
+        sans: [
+          'Inter',
+          'Segoe UI',
+          'Source Sans 3',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'sans-serif',
+        ],
+      },
     },
   },
   plugins: [],

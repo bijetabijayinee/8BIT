@@ -65,10 +65,7 @@ function renderNumbers(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(text.slice(lastIndex, match.index));
     }
     nodes.push(
-      <span
-        key={`${keyPrefix}-num-${match.index}`}
-        className="mx-0.5 rounded bg-slate-900/90 px-1.5 py-0.5 text-xs font-bold tabular-nums text-white"
-      >
+      <span key={`${keyPrefix}-num-${match.index}`} className="font-bold tabular-nums">
         {token}
       </span>,
     );

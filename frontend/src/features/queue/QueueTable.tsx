@@ -2,11 +2,13 @@ import {
   Activity,
   AlertCircle,
   BadgeAlert,
+  Bell,
   BrainCircuit,
   CalendarDays,
   CalendarPlus,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   ClipboardList,
   Clock3,
@@ -20,6 +22,7 @@ import {
   Pill,
   PlayCircle,
   RefreshCw,
+  Send,
   ShieldAlert,
   Stethoscope,
   Thermometer,
@@ -38,6 +41,7 @@ import { showToast } from '../../components/toast';
 import {
   ApiError,
   assignQueueDoctor,
+  createNotification,
   createThreadComment,
   generatePatientReport,
   getIntake,
@@ -538,6 +542,18 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
     }
   };
 
+  const handleNotifyDoctor = async (doctor: { id: string; staffCode: string; displayName: string }, entry: QueueEntry, message: string) => {
+    await createNotification({
+      recipientStaffLookup: doctor.staffCode || doctor.id,
+      patientDisplayId: entry.patientDisplayId,
+      category: 'STAFF_MESSAGE',
+      title: `Message about ${entry.patientDisplayId}`,
+      body: message,
+      agent: activeStaff?.displayName ?? activeStaff?.staffCode ?? 'Care team',
+    });
+    showToast('success', `Notified ${doctor.displayName}`, `About ${entry.patientDisplayId}`);
+  };
+
   const openIntakeDetail = async (entry: QueueEntry) => {
     setSelectedIntake(null);
     setDetailError(null);
@@ -595,6 +611,7 @@ export function QueueTable({ refreshSignal = 0, searchQuery, activeStaff, onAppo
             void handleAssignDoctor(entry, doctorId);
           }
         }}
+        onNotifyDoctor={handleNotifyDoctor}
         onOpenEntry={openIntakeDetail}
         onStatusChange={handleStatusChange}
       />
@@ -710,6 +727,7 @@ interface QueueCommandCenterProps {
   updatingPatientId: string | null;
   waitingCount: number;
   onDoctorOverrideChange: (patientId: string, doctorId: string) => void;
+  onNotifyDoctor: (doctor: { id: string; staffCode: string; displayName: string }, entry: QueueEntry, message: string) => Promise<void>;
   onOpenEntry: (entry: QueueEntry) => void;
   onStatusChange: (entry: QueueEntry, status: QueueStatus) => Promise<void>;
 }
@@ -724,6 +742,7 @@ function QueueCommandCenter({
   updatingPatientId,
   waitingCount,
   onDoctorOverrideChange,
+  onNotifyDoctor,
   onOpenEntry,
   onStatusChange,
 }: QueueCommandCenterProps) {
@@ -848,53 +867,21 @@ function QueueCommandCenter({
           </div>
         </div>
 
-        <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {engagedEntries.length === 0 ? (
             <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">
               No doctors engaged right now.
             </div>
           ) : (
-            <>
-              {doctorAssignments.assigned.map((assignment) => (
-                <DoctorAssignmentCard
-                  key={assignment.entry.patientId}
-                  assignment={assignment}
-                  doctors={doctors}
-                  updatingPatientId={updatingPatientId}
-                  onDoctorOverrideChange={onDoctorOverrideChange}
-                  onOpenEntry={onOpenEntry}
-                  onStatusChange={onStatusChange}
-                />
-              ))}
-
-              {doctorAssignments.queued.length > 0 ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-amber-900">Doctor queue</h4>
-                      <p className="mt-1 text-xs text-amber-800">No matching active specialty is free yet.</p>
-                    </div>
-                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
-                      {doctorAssignments.queued.length}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {doctorAssignments.queued.map((assignment) => (
-                      <DoctorAssignmentCard
-                        key={assignment.entry.patientId}
-                        assignment={assignment}
-                        doctors={doctors}
-                        updatingPatientId={updatingPatientId}
-                        onDoctorOverrideChange={onDoctorOverrideChange}
-                        onOpenEntry={onOpenEntry}
-                        onStatusChange={onStatusChange}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </>
+            <EngagedDoctorsTree
+              assignments={doctorAssignments}
+              doctors={doctors}
+              updatingPatientId={updatingPatientId}
+              onDoctorOverrideChange={onDoctorOverrideChange}
+              onNotifyDoctor={onNotifyDoctor}
+              onOpenEntry={onOpenEntry}
+              onStatusChange={onStatusChange}
+            />
           )}
         </div>
       </section>
@@ -902,103 +889,312 @@ function QueueCommandCenter({
   );
 }
 
-interface DoctorAssignmentCardProps {
-  assignment: DoctorAssignment;
+interface EngagedDoctorsTreeProps {
+  assignments: { assigned: DoctorAssignment[]; queued: DoctorAssignment[] };
   doctors: StaffUser[];
   updatingPatientId: string | null;
   onDoctorOverrideChange: (patientId: string, doctorId: string) => void;
+  onNotifyDoctor: (doctor: { id: string; staffCode: string; displayName: string }, entry: QueueEntry, message: string) => Promise<void>;
   onOpenEntry: (entry: QueueEntry) => void;
   onStatusChange: (entry: QueueEntry, status: QueueStatus) => Promise<void>;
 }
 
-function DoctorAssignmentCard({
-  assignment,
+/**
+ * The engaged-doctors panel as a collapsible tree: each active doctor is a branch,
+ * their patients are the leaves, and every leaf carries inline actions (start treatment,
+ * notify the doctor, move to triage, discharge, open). Patients with no free matching
+ * specialist collect under an "Awaiting specialist" branch.
+ */
+function EngagedDoctorsTree({
+  assignments,
   doctors,
   updatingPatientId,
   onDoctorOverrideChange,
+  onNotifyDoctor,
   onOpenEntry,
   onStatusChange,
-}: DoctorAssignmentCardProps) {
-  const activeDoctors = doctors
-    .filter((doctor) => doctor.active)
-    .sort((first, second) => first.displayName.localeCompare(second.displayName));
-  const isAssigned = Boolean(assignment.doctor);
-  const selectedDoctorId = assignment.overrideDoctorId ?? assignment.doctor?.id ?? '';
-  const entry = assignment.entry;
+}: EngagedDoctorsTreeProps) {
+  const doctorGroups = useMemo(() => {
+    const map = new Map<string, { doctor: StaffUser; assignments: DoctorAssignment[] }>();
+    assignments.assigned.forEach((assignment) => {
+      if (!assignment.doctor) {
+        return;
+      }
+      const group = map.get(assignment.doctor.id) ?? { doctor: assignment.doctor, assignments: [] };
+      group.assignments.push(assignment);
+      map.set(assignment.doctor.id, group);
+    });
+    return Array.from(map.values()).sort((first, second) =>
+      first.doctor.displayName.localeCompare(second.doctor.displayName),
+    );
+  }, [assignments.assigned]);
 
   return (
-    <article className={`rounded-md border p-3 ${isAssigned ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-white'}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Avatar name={assignment.doctor?.displayName ?? 'Awaiting specialist'} kind="doctor" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-slate-950">
-              {assignment.doctor?.displayName ?? 'Awaiting specialist'}
-            </p>
-            <p className="mt-1 truncate text-xs text-slate-500">
-              {assignment.doctor?.specialty ?? assignment.requiredSpecialty}
-            </p>
-          </div>
-        </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ring-1 ring-inset ${
-            assignment.manuallyAssigned
-              ? 'bg-indigo-50 text-indigo-800 ring-indigo-200'
-              : isAssigned
-                ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
-                : 'bg-amber-50 text-amber-800 ring-amber-200'
-          }`}
-        >
-          {assignment.manuallyAssigned ? 'Override' : isAssigned ? 'Matched' : 'Queued'}
-        </span>
-      </div>
+    <div className="space-y-2">
+      {doctorGroups.map((group) => (
+        <DoctorTreeBranch
+          key={group.doctor.id}
+          doctor={group.doctor}
+          assignments={group.assignments}
+          doctors={doctors}
+          updatingPatientId={updatingPatientId}
+          onDoctorOverrideChange={onDoctorOverrideChange}
+          onNotifyDoctor={onNotifyDoctor}
+          onOpenEntry={onOpenEntry}
+          onStatusChange={onStatusChange}
+        />
+      ))}
 
-      <div className="mt-3 rounded-md bg-white p-3 ring-1 ring-inset ring-slate-100">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <button
-              type="button"
-              onClick={() => onOpenEntry(entry)}
-              className="truncate text-left text-sm font-semibold text-slate-950 hover:text-emerald-700"
-            >
-              {entry.patientDisplayId}
-            </button>
-            <p className="mt-1 line-clamp-2 text-xs text-slate-500">{entry.chiefComplaint}</p>
-          </div>
-          <StatusPill status={entry.status} />
-        </div>
-        <p className="mt-2 text-xs font-medium text-slate-500">
-          Needs {assignment.requiredSpecialty} - {assignment.reason}
-        </p>
-      </div>
+      {assignments.queued.length > 0 ? (
+        <DoctorTreeBranch
+          doctor={null}
+          assignments={assignments.queued}
+          doctors={doctors}
+          updatingPatientId={updatingPatientId}
+          onDoctorOverrideChange={onDoctorOverrideChange}
+          onNotifyDoctor={onNotifyDoctor}
+          onOpenEntry={onOpenEntry}
+          onStatusChange={onStatusChange}
+        />
+      ) : null}
+    </div>
+  );
+}
 
-      <label className="mt-3 block text-xs font-semibold text-slate-600">
-        Manual doctor override
-        <select
-          value={selectedDoctorId}
-          onChange={(event) => onDoctorOverrideChange(entry.patientId, event.target.value)}
-          className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-          aria-label={`Manual doctor override for ${entry.patientDisplayId}`}
-        >
-          <option value="">{isAssigned ? 'Use specialty match' : 'Select doctor'}</option>
-          {activeDoctors.map((doctor) => (
-            <option key={doctor.id} value={doctor.id}>
-              {doctor.displayName} - {doctor.specialty ?? doctor.department ?? 'No specialty'}
-            </option>
-          ))}
-        </select>
-      </label>
+interface DoctorTreeBranchProps {
+  doctor: StaffUser | null;
+  assignments: DoctorAssignment[];
+  doctors: StaffUser[];
+  updatingPatientId: string | null;
+  onDoctorOverrideChange: (patientId: string, doctorId: string) => void;
+  onNotifyDoctor: (doctor: { id: string; staffCode: string; displayName: string }, entry: QueueEntry, message: string) => Promise<void>;
+  onOpenEntry: (entry: QueueEntry) => void;
+  onStatusChange: (entry: QueueEntry, status: QueueStatus) => Promise<void>;
+}
 
+function DoctorTreeBranch({
+  doctor,
+  assignments,
+  doctors,
+  updatingPatientId,
+  onDoctorOverrideChange,
+  onNotifyDoctor,
+  onOpenEntry,
+  onStatusChange,
+}: DoctorTreeBranchProps) {
+  const [isOpen, setIsOpen] = useState(true);
+  const isAwaiting = doctor === null;
+  const name = doctor?.displayName ?? 'Awaiting specialist';
+  const specialty = doctor?.specialty ?? doctor?.department ?? assignments[0]?.requiredSpecialty ?? 'Unassigned';
+
+  return (
+    <div className={`rounded-md border ${isAwaiting ? 'border-amber-200 bg-amber-50/60' : 'border-emerald-100 bg-emerald-50/50'}`}>
       <button
         type="button"
-        onClick={() => void onStatusChange(entry, 'DISCHARGED')}
-        disabled={!isAssigned || updatingPatientId === entry.patientId}
-        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left"
+        aria-expanded={isOpen}
       >
-        <CheckCircle2 size={15} aria-hidden="true" />
-        Treatment done
+        <ChevronRight
+          size={15}
+          aria-hidden="true"
+          className={`shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+        />
+        <Avatar name={name} kind="doctor" size="sm" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-slate-950">{name}</p>
+          <p className="truncate text-[11px] text-slate-500">{specialty}</p>
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
+            isAwaiting ? 'bg-amber-100 text-amber-800 ring-amber-200' : 'bg-emerald-100 text-emerald-800 ring-emerald-200'
+          }`}
+        >
+          {assignments.length} {isAwaiting ? 'queued' : assignments.length === 1 ? 'patient' : 'patients'}
+        </span>
       </button>
-    </article>
+
+      {isOpen ? (
+        <div className="space-y-2 border-t border-white/60 px-2.5 pb-2.5 pt-2">
+          {assignments.map((assignment) => (
+            <EngagedPatientLeaf
+              key={assignment.entry.patientId}
+              assignment={assignment}
+              doctor={doctor}
+              doctors={doctors}
+              updatingPatientId={updatingPatientId}
+              onDoctorOverrideChange={onDoctorOverrideChange}
+              onNotifyDoctor={onNotifyDoctor}
+              onOpenEntry={onOpenEntry}
+              onStatusChange={onStatusChange}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface EngagedPatientLeafProps {
+  assignment: DoctorAssignment;
+  doctor: StaffUser | null;
+  doctors: StaffUser[];
+  updatingPatientId: string | null;
+  onDoctorOverrideChange: (patientId: string, doctorId: string) => void;
+  onNotifyDoctor: (doctor: { id: string; staffCode: string; displayName: string }, entry: QueueEntry, message: string) => Promise<void>;
+  onOpenEntry: (entry: QueueEntry) => void;
+  onStatusChange: (entry: QueueEntry, status: QueueStatus) => Promise<void>;
+}
+
+function EngagedPatientLeaf({
+  assignment,
+  doctor,
+  doctors,
+  updatingPatientId,
+  onDoctorOverrideChange,
+  onNotifyDoctor,
+  onOpenEntry,
+  onStatusChange,
+}: EngagedPatientLeafProps) {
+  const entry = assignment.entry;
+  const [isNotifyOpen, setIsNotifyOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const isUpdating = updatingPatientId === entry.patientId;
+  const inTreatment = entry.status === 'IN_TREATMENT';
+  const activeDoctors = doctors
+    .filter((item) => item.active)
+    .sort((first, second) => first.displayName.localeCompare(second.displayName));
+  const selectedDoctorId = assignment.overrideDoctorId ?? assignment.doctor?.id ?? '';
+
+  const openNotify = () => {
+    setMessage(`Please review ${entry.patientDisplayId} - ${entry.chiefComplaint}`);
+    setIsNotifyOpen(true);
+  };
+
+  const sendNotify = async () => {
+    if (!doctor || !message.trim()) {
+      return;
+    }
+    setIsSending(true);
+    try {
+      await onNotifyDoctor(doctor, entry, message.trim());
+      setIsNotifyOpen(false);
+    } catch (caughtError) {
+      toastActionError(caughtError, 'Unable to send notification');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="ml-2 border-l-2 border-slate-200 pl-3">
+      <div className="rounded-md bg-white p-2.5 shadow-sm ring-1 ring-inset ring-slate-100">
+        <div className="flex items-start justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenEntry(entry)}
+            className="min-w-0 text-left"
+          >
+            <span className="block truncate text-sm font-semibold text-slate-950 hover:text-emerald-700">{entry.patientDisplayId}</span>
+            <span className="mt-0.5 block line-clamp-1 text-xs text-slate-500">{entry.chiefComplaint}</span>
+          </button>
+          <StatusPill status={entry.status} />
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void onStatusChange(entry, 'IN_TREATMENT')}
+            disabled={inTreatment || isUpdating}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-emerald-700 px-2 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Start treatment"
+          >
+            <PlayCircle size={13} aria-hidden="true" />
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={openNotify}
+            disabled={!doctor}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title={doctor ? `Notify ${doctor.displayName}` : 'No doctor assigned'}
+          >
+            <Bell size={13} aria-hidden="true" />
+            Notify
+          </button>
+          <IconStatusButton
+            label="Triage"
+            disabled={entry.status === 'IN_TRIAGE' || isUpdating}
+            onClick={() => void onStatusChange(entry, 'IN_TRIAGE')}
+            icon={<ClipboardCheck size={13} aria-hidden="true" />}
+          />
+          <button
+            type="button"
+            onClick={() => void onStatusChange(entry, 'DISCHARGED')}
+            disabled={!inTreatment || isUpdating}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-emerald-200 bg-white text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Discharge"
+          >
+            <CheckCircle2 size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenEntry(entry)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+            title="Open patient"
+          >
+            <FileText size={13} aria-hidden="true" />
+          </button>
+        </div>
+
+        {isNotifyOpen ? (
+          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              placeholder={`Message to ${doctor?.displayName ?? 'doctor'}`}
+            />
+            <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setIsNotifyOpen(false)}
+                className="inline-flex h-7 items-center rounded-md px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void sendNotify()}
+                disabled={isSending || !message.trim()}
+                className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSending ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Send size={12} aria-hidden="true" />}
+                Send
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {!assignment.doctor ? (
+          <select
+            value={selectedDoctorId}
+            onChange={(event) => onDoctorOverrideChange(entry.patientId, event.target.value)}
+            className="mt-2 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+            aria-label={`Assign doctor for ${entry.patientDisplayId}`}
+          >
+            <option value="">Assign doctor</option>
+            {activeDoctors.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.displayName} - {item.specialty ?? item.department ?? 'No specialty'}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1377,7 +1573,7 @@ function IntakeDetailDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-slate-950/45 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 bg-slate-950/45 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
       <div className="mx-auto flex h-full max-w-6xl min-w-0 flex-col overflow-hidden rounded-lg bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b border-sky-100 px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">

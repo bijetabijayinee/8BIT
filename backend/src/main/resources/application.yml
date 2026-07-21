@@ -73,6 +73,9 @@ openai:
   enabled: ${OPENAI_ENABLED}
   api-key: ${OPENAI_API_KEY}
   model: ${OPENAI_MODEL}
+  # Model used for the Medical Research Agent's live web-search calls. Only override this
+  # if your main OPENAI_MODEL doesn't support the Responses API "web_search_preview" tool.
+  research-model: ${OPENAI_RESEARCH_MODEL:}
 
 ai-service:
   url: ${AI_SERVICE_URL:}
@@ -80,3 +83,5 @@ ai-service:
 research:
   # Optional NCBI E-utilities key: raises the PubMed rate limit from 3 to 10 req/s.
   ncbi-api-key: ${NCBI_API_KEY:}
+  # City used for local outbreak / health-news matching (Google News India edition).
+  local-city: ${RESEARCH_LOCAL_CITY:Delhi}

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -31,8 +32,8 @@ public class IntakeController {
     }
 
     @GetMapping("/next-patient-display-id")
-    public Map<String, String> nextPatientDisplayId() {
-        return Map.of("patientDisplayId", intakeService.nextPatientDisplayId());
+    public Map<String, String> nextPatientDisplayId(@RequestParam(required = false) String department) {
+        return Map.of("patientDisplayId", intakeService.nextPatientDisplayId(department));
     }
 
     @GetMapping("/{id}")

@@ -1,5 +1,8 @@
 package com.careflowai.agent;
 
+import com.careflowai.ai.OpenAiResponsesClient;
+import com.careflowai.ai.OpenAiResponsesClient.WebCitation;
+import com.careflowai.ai.OpenAiResponsesClient.WebSearchOutcome;
 import com.careflowai.ai.SpringAiChatService;
 import com.careflowai.intake.Intake;
 import com.careflowai.patient.Patient;
@@ -11,9 +14,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -26,14 +31,18 @@ import org.springframework.web.client.RestClient;
 /**
  * Medical expert agent that runs INSIDE the intake workflow, before queue sorting and
  * doctor assignment, so its findings feed the later stages:
- *   1. builds candidate search queries from the triage LLM's suggested diagnosis,
- *      the chief complaint, and the structured symptoms,
- *   2. calls its live online tools - PubMed (NCBI E-utilities) and Europe PMC for
- *      peer-reviewed literature, with Wikipedia's medical reference as a fallback -
- *      trying each query until articles are found,
- *   3. asks the LLM to reason over the articles against the patient's presentation,
- *   4. saves the briefing + citation links to the patient thread and timeline,
+ *   1. builds candidate search terms from the triage LLM's suggested diagnosis, the chief
+ *      complaint, and the structured symptoms,
+ *   2. gathers PubMed (NCBI E-utilities) peer-reviewed grounding for the presentation,
+ *   3. hands that grounding to an LLM call armed with OpenAI's live web_search tool, which
+ *      itself decides what to search - current medical guidance, and recent local news for
+ *      the hospital's city - reasoning over real, different results every time,
+ *   4. saves the reasoned briefing + every real citation the model actually used to the
+ *      patient thread and timeline (never a fixed link set),
  *   5. returns the briefing so the Assignment Agent can use it when choosing a doctor.
+ *
+ * A human always reviews the saved briefing before it drives any action - the agent writes
+ * research notes, it does not prescribe or decide treatment.
  */
 @Component
 public class MedicalResearchAgent {
@@ -41,18 +50,38 @@ public class MedicalResearchAgent {
     private static final Logger log = LoggerFactory.getLogger(MedicalResearchAgent.class);
     private static final String AGENT_NAME = "Medical Research Agent";
     private static final String AGENT_CODE = "RESEARCH_AGENT";
-    private static final int MAX_ARTICLES_PER_SOURCE = 3;
-    private static final int MAX_ARTICLES_TOTAL = 5;
+    private static final int MAX_PUBMED_ARTICLES = 4;
+    private static final int MAX_CITATIONS_SAVED = 12;
     private static final Set<String> QUALIFIER_WORDS = Set.of(
         "possible", "suspected", "likely", "probable", "acute", "rule", "out", "r/o", "vs", "versus");
 
-    private static final String SUMMARY_INSTRUCTION = """
+    private static final String WEB_SEARCH_INSTRUCTION_TEMPLATE = """
+        You are a medical research assistant supporting hospital triage staff in India (not the patient).
+        You have a live web_search tool - actually use it, do not answer from memory alone. For this case,
+        run at least two distinct searches:
+          1. current medical/clinical information on the suspected condition or presenting complaint,
+          2. recent news (last few weeks) about disease outbreaks, seasonal surges, or public-health
+             advisories specifically for %s, India, that could plausibly relate to this presentation.
+        If prior peer-reviewed excerpts are supplied below, treat them as additional grounding alongside
+        your own live results - reason over everything together.
+
+        Write a concise educational briefing for staff: 4-6 lines, each starting with "- ". Cover what the
+        condition typically involves and warning signs to watch for. Keep numbers explicit.
+        - If a local news result shows a matching outbreak or seasonal surge, add a line starting
+          "LOCAL ALERT:" naming the disease and why it may be relevant here.
+        - Start any truly time-critical clinical line with "WARNING:".
+        - Finish with one line starting "Suggested tests:" listing 2-4 relevant investigations.
+        Do NOT prescribe medication, dosages, or a treatment plan. No definitive diagnosis.
+        """;
+
+    private static final String FALLBACK_SUMMARY_INSTRUCTION = """
         You are a medical research assistant supporting hospital triage staff (not the patient).
         Given a patient's presentation and excerpts from public medical reference articles,
         write a concise educational briefing.
         Format: 3-5 lines, each starting with "- ". Cover what the condition typically involves,
         warning signs staff should watch for, and assessment considerations. Keep numbers explicit.
-        Start any truly time-critical line with "WARNING:".
+        Start any truly time-critical line with "WARNING:". Finish with a line starting
+        "Suggested tests:" listing 2-4 relevant investigations.
         Do NOT prescribe medication, dosages, or a treatment plan. No definitive diagnosis.
         """;
 
@@ -61,24 +90,30 @@ public class MedicalResearchAgent {
     private final SystemAgentService systemAgentService;
     private final WorkflowStreamService workflowStream;
     private final SpringAiChatService springAiChatService;
+    private final OpenAiResponsesClient openAiResponsesClient;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
     private final String ncbiApiKey;
+    private final String localCity;
 
     public MedicalResearchAgent(PatientTimelineEventRepository timelineRepository,
                                 PatientThreadCommentRepository threadCommentRepository,
                                 SystemAgentService systemAgentService,
                                 WorkflowStreamService workflowStream,
                                 SpringAiChatService springAiChatService,
+                                OpenAiResponsesClient openAiResponsesClient,
                                 ObjectMapper objectMapper,
-                                @org.springframework.beans.factory.annotation.Value("${research.ncbi-api-key:}") String ncbiApiKey) {
+                                @org.springframework.beans.factory.annotation.Value("${research.ncbi-api-key:}") String ncbiApiKey,
+                                @org.springframework.beans.factory.annotation.Value("${research.local-city:Delhi}") String localCity) {
         this.ncbiApiKey = ncbiApiKey;
+        this.localCity = (localCity == null || localCity.isBlank()) ? "Delhi" : localCity.trim();
         this.timelineRepository = timelineRepository;
         this.threadCommentRepository = threadCommentRepository;
         this.systemAgentService = systemAgentService;
         this.workflowStream = workflowStream;
         this.springAiChatService = springAiChatService;
+        this.openAiResponsesClient = openAiResponsesClient;
         this.objectMapper = objectMapper;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(5_000);
@@ -109,39 +144,52 @@ public class MedicalResearchAgent {
         }
 
         List<String> queries = candidateQueries(suggestedDiagnosis, intake);
-        workflowStream.publish(displayId, "RESEARCH_STARTED", AGENT_NAME, "Searching medical articles",
-            "Searching online medical references. Query plan: " + String.join(" -> ", queries) + ".",
+        String primaryTopic = queries.isEmpty() ? intake.getChiefComplaint() : queries.get(0);
+        workflowStream.publish(displayId, "RESEARCH_STARTED", AGENT_NAME, "Researching live",
+            "Gathering PubMed grounding, then reasoning with a live web search over medical sources "
+                + "and " + localCity + " news for \"" + primaryTopic + "\".",
             researchStartReasoning(suggestedDiagnosis, queries));
 
         try {
-            List<Article> articles = List.of();
-            String usedQuery = null;
+            List<Article> pubmedArticles = new ArrayList<>();
             for (String query : queries) {
-                articles = searchArticles(query);
-                log.info("Research query '{}' for {} returned {} articles", query, displayId, articles.size());
-                if (!articles.isEmpty()) {
-                    usedQuery = query;
+                pubmedArticles = new ArrayList<>(searchPubMed(query));
+                log.info("PubMed query '{}' for {} returned {} articles", query, displayId, pubmedArticles.size());
+                if (!pubmedArticles.isEmpty()) {
                     break;
                 }
             }
-            if (articles.isEmpty()) {
-                workflowStream.publish(displayId, "RESEARCH_SAVED", AGENT_NAME, "No articles found",
-                    "No online reference matched any query (" + String.join(", ", queries) + ").",
-                    "The online medical reference returned no usable match for any of the tried queries. "
-                        + "Staff should rely on the triage assessment. Check backend logs ('Research query') "
-                        + "to confirm the searches actually reached the internet.");
+
+            WebSearchOutcome webOutcome = runLiveWebSearch(intake, suggestedDiagnosis, pubmedArticles, displayId);
+
+            String briefing;
+            List<Citation> citations;
+            if (webOutcome != null && StringUtils.hasText(webOutcome.text())) {
+                briefing = webOutcome.text().trim();
+                citations = mergeCitations(pubmedArticles, webOutcome.citations());
+                workflowStream.publish(displayId, "RESEARCH_SOURCES", AGENT_NAME, "Live search complete",
+                    "The agent ran its own live web search and found %d real source(s), plus %d PubMed article(s).".formatted(
+                        webOutcome.citations().size(), pubmedArticles.size()),
+                    liveSearchReasoning(webOutcome, pubmedArticles));
+            } else if (!pubmedArticles.isEmpty()) {
+                briefing = fallbackSummarize(intake, suggestedDiagnosis, pubmedArticles);
+                citations = pubmedArticles.stream().map(a -> new Citation(a.title(), a.url())).toList();
+                workflowStream.publish(displayId, "RESEARCH_SOURCES", AGENT_NAME, "Using PubMed only",
+                    "Live web search was unavailable; the briefing is grounded in %d PubMed article(s) instead.".formatted(pubmedArticles.size()),
+                    "Live web search either returned nothing or the OpenAI web-search tool is not reachable/enabled "
+                        + "for the configured account or model. Falling back to PubMed-only grounding so research "
+                        + "still reaches the patient record.");
+            } else {
+                workflowStream.publish(displayId, "RESEARCH_SAVED", AGENT_NAME, "No research available",
+                    "Neither PubMed nor live web search returned usable results for \"" + primaryTopic + "\".",
+                    "PubMed had no matching articles and the live web search either found nothing or is unavailable "
+                        + "(check OPENAI_API_KEY / model access to the web_search tool). Staff should rely on the "
+                        + "triage assessment. Research can be retried on the next intake.");
                 return Optional.empty();
             }
 
-            workflowStream.publish(displayId, "RESEARCH_SOURCES", AGENT_NAME, "Articles found",
-                "Query \"%s\" matched %d articles.".formatted(usedQuery, articles.size()),
-                articlesReasoning(usedQuery, articles));
-
-            String briefing = summarize(intake, suggestedDiagnosis, articles);
-            saveResearch(patient, intake, articles, briefing);
-            List<Citation> citations = articles.stream()
-                .map(article -> new Citation(article.title(), article.url()))
-                .toList();
+            citations = citations.size() <= MAX_CITATIONS_SAVED ? citations : citations.subList(0, MAX_CITATIONS_SAVED);
+            saveResearch(patient, intake, citations, briefing);
 
             workflowStream.publish(displayId, "RESEARCH_SAVED", AGENT_NAME, "Research saved to patient record",
                 "Briefing and %d citations saved to %s's thread. Findings now feed queue sorting and doctor assignment.".formatted(
@@ -151,11 +199,47 @@ public class MedicalResearchAgent {
         } catch (Exception failure) {
             log.warn("Medical research failed for {}: {}", displayId, failure.toString());
             workflowStream.publish(displayId, "RESEARCH_SAVED", AGENT_NAME, "Research unavailable",
-                "Online article search failed (" + shorten(failure.getMessage(), 120) + "). Workflow continues without it.",
-                "The agent could not reach the online medical reference (network error or timeout). "
+                "Online research failed (" + shorten(failure.getMessage(), 120) + "). Workflow continues without it.",
+                "The agent could not complete PubMed or live web search (network error or timeout). "
                     + "The remaining agents still run; research can be retried on the next intake.");
             return Optional.empty();
         }
+    }
+
+    /** Non-fatal: a web-search outage never blocks the rest of the intake workflow. */
+    private WebSearchOutcome runLiveWebSearch(Intake intake, String suggestedDiagnosis, List<Article> pubmedArticles, String displayId) {
+        if (!openAiResponsesClient.isAvailable()) {
+            return null;
+        }
+        try {
+            String instruction = WEB_SEARCH_INSTRUCTION_TEMPLATE.formatted(localCity);
+            StringBuilder userInput = new StringBuilder();
+            userInput.append("Hospital city: ").append(localCity).append("\n");
+            userInput.append("Patient presentation: ").append(intake.getChiefComplaint());
+            if (intake.getStructuredSymptoms() != null && !intake.getStructuredSymptoms().isEmpty()) {
+                userInput.append(" | symptoms: ").append(String.join(", ", intake.getStructuredSymptoms()));
+            }
+            if (StringUtils.hasText(suggestedDiagnosis)) {
+                userInput.append(" | triage concern: ").append(suggestedDiagnosis);
+            }
+            if (!pubmedArticles.isEmpty()) {
+                userInput.append("\n\nPrior peer-reviewed excerpts (optional grounding):\n");
+                pubmedArticles.forEach(article -> userInput.append("- ").append(article.title()).append(": ")
+                    .append(shorten(article.summary(), 400)).append("\n"));
+            }
+            return openAiResponsesClient.respondWithWebSearch(instruction, userInput.toString());
+        } catch (Exception webSearchFailure) {
+            log.warn("Live web search failed for {}: {}", displayId, webSearchFailure.getMessage());
+            return null;
+        }
+    }
+
+    /** PubMed citations first (peer-reviewed), then whatever the live web search actually cited, deduped by URL. */
+    private List<Citation> mergeCitations(List<Article> pubmedArticles, List<WebCitation> webCitations) {
+        Map<String, Citation> byUrl = new LinkedHashMap<>();
+        pubmedArticles.forEach(article -> byUrl.putIfAbsent(article.url(), new Citation(article.title(), article.url())));
+        webCitations.forEach(citation -> byUrl.putIfAbsent(citation.url(), new Citation(citation.title(), citation.url())));
+        return new ArrayList<>(byUrl.values());
     }
 
     private List<String> candidateQueries(String suggestedDiagnosis, Intake intake) {
@@ -194,59 +278,37 @@ public class MedicalResearchAgent {
         reasoning.append("- Basis: ").append(StringUtils.hasText(suggestedDiagnosis)
             ? "triage LLM's suggested concern \"" + suggestedDiagnosis + "\""
             : "the recorded complaint and symptoms").append("\n");
-        reasoning.append("- Tools: PubMed (NCBI E-utilities) and Europe PMC for peer-reviewed literature, "
-            + "Wikipedia medical reference as fallback (live internet search)\n");
-        reasoning.append("- Query plan (tried in order until articles are found):\n");
+        reasoning.append("- Tools: PubMed (NCBI E-utilities) for peer-reviewed grounding, then an LLM call armed "
+            + "with a live web_search tool - the model itself decides what to search (current medical guidance, "
+            + "plus recent " + localCity + " health news) and reasons over the real results. Nothing here is a "
+            + "fixed link set; the sources differ every time.\n");
+        reasoning.append("- PubMed query plan (tried in order until articles are found):\n");
         queries.forEach(query -> reasoning.append("  - \"").append(query).append("\"\n"));
-        reasoning.append("- Its findings are saved to the record and handed to the Priority and Assignment agents.");
+        reasoning.append("- Its findings are saved to the record and handed to the Priority and Assignment agents. "
+            + "A human still reviews the briefing before it drives any action.");
         return reasoning.toString();
     }
 
-    private String articlesReasoning(String usedQuery, List<Article> articles) {
-        StringBuilder reasoning = new StringBuilder("Query \"" + usedQuery + "\" returned these reference articles:\n");
-        articles.forEach(article -> reasoning.append("- [").append(article.source()).append("] ").append(article.title())
-            .append(" - ").append(shorten(article.summary(), 180))
-            .append(" ").append(article.url()).append("\n"));
-        reasoning.append("The agent now reasons over these against the patient's presentation.");
+    private String liveSearchReasoning(WebSearchOutcome webOutcome, List<Article> pubmedArticles) {
+        StringBuilder reasoning = new StringBuilder(
+            "The model ran its own live web search (medical sources + local news) and reasoned over the results:\n");
+        webOutcome.citations().forEach(citation -> reasoning.append("- ").append(citation.title())
+            .append(" ").append(citation.url()).append("\n"));
+        if (!pubmedArticles.isEmpty()) {
+            reasoning.append("Plus PubMed grounding:\n");
+            pubmedArticles.forEach(article -> reasoning.append("- [PubMed] ").append(article.title())
+                .append(" ").append(article.url()).append("\n"));
+        }
+        reasoning.append("The agent now writes the briefing from this live-reasoned context.");
         return reasoning.toString();
     }
 
     private String savedReasoning(String briefing, List<Citation> citations) {
-        StringBuilder reasoning = new StringBuilder("Briefing written from the articles:\n");
+        StringBuilder reasoning = new StringBuilder("Briefing written from live research:\n");
         reasoning.append(briefing).append("\n\nCitations attached to the patient record:\n");
         citations.forEach(citation -> reasoning.append("- ").append(citation.title())
             .append(" ").append(citation.url()).append("\n"));
         return reasoning.toString();
-    }
-
-    /**
-     * Aggregates live results across sources in credibility order: peer-reviewed
-     * literature first (PubMed, Europe PMC), general medical reference last.
-     * Each source failing is logged and skipped so one outage never kills research.
-     */
-    private List<Article> searchArticles(String query) {
-        List<Article> articles = new ArrayList<>();
-        collectSource(articles, "PubMed", () -> searchPubMed(query));
-        if (articles.size() < MAX_ARTICLES_TOTAL) {
-            collectSource(articles, "Europe PMC", () -> searchEuropePmc(query));
-        }
-        if (articles.isEmpty()) {
-            collectSource(articles, "Wikipedia", () -> searchWikipedia(query));
-        }
-        return articles.size() <= MAX_ARTICLES_TOTAL ? articles : articles.subList(0, MAX_ARTICLES_TOTAL);
-    }
-
-    @FunctionalInterface
-    private interface ArticleSearch {
-        List<Article> run() throws Exception;
-    }
-
-    private void collectSource(List<Article> into, String sourceName, ArticleSearch search) {
-        try {
-            into.addAll(search.run());
-        } catch (Exception sourceFailure) {
-            log.warn("{} search failed: {}", sourceName, sourceFailure.getMessage());
-        }
     }
 
     /** PubMed via NCBI E-utilities: esearch for PMIDs, esummary for titles, efetch for abstracts. */
@@ -254,7 +316,7 @@ public class MedicalResearchAgent {
         String keyParam = StringUtils.hasText(ncbiApiKey) ? "&api_key=" + ncbiApiKey : "";
         String searchUrl = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
             + "?db=pubmed&retmode=json&sort=relevance&retmax=%d&term=%s%s")
-            .formatted(MAX_ARTICLES_PER_SOURCE, URLEncoder.encode(query, StandardCharsets.UTF_8), keyParam);
+            .formatted(MAX_PUBMED_ARTICLES, URLEncoder.encode(query, StandardCharsets.UTF_8), keyParam);
         JsonNode idList = objectMapper.readTree(restClient.get().uri(searchUrl).retrieve().body(String.class))
             .path("esearchresult").path("idlist");
         List<String> pmids = new ArrayList<>();
@@ -282,7 +344,7 @@ public class MedicalResearchAgent {
             String summary = StringUtils.hasText(abstractText)
                 ? abstractText
                 : "%s (%s).".formatted(journal.isBlank() ? "PubMed-indexed article" : journal, pubDate);
-            articles.add(new Article(title, "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/", summary, "PubMed"));
+            articles.add(new Article(title, "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/", summary));
         }
         return articles;
     }
@@ -298,72 +360,8 @@ public class MedicalResearchAgent {
         }
     }
 
-    /** Europe PMC REST search: peer-reviewed literature plus preprints, JSON with abstracts. */
-    private List<Article> searchEuropePmc(String query) throws Exception {
-        String url = ("https://www.ebi.ac.uk/europepmc/webservices/rest/search"
-            + "?format=json&pageSize=%d&resultType=core&query=%s")
-            .formatted(MAX_ARTICLES_PER_SOURCE, URLEncoder.encode(query, StandardCharsets.UTF_8));
-        JsonNode results = objectMapper.readTree(restClient.get().uri(url).retrieve().body(String.class))
-            .path("resultList").path("result");
-        List<Article> articles = new ArrayList<>();
-        for (JsonNode result : results) {
-            String title = result.path("title").asText("");
-            String source = result.path("source").asText("");
-            String id = result.path("id").asText("");
-            if (title.isBlank() || source.isBlank() || id.isBlank()) {
-                continue;
-            }
-            String summary = result.path("abstractText").asText("");
-            if (!StringUtils.hasText(summary)) {
-                summary = "%s (%s).".formatted(
-                    result.path("journalInfo").path("journal").path("title").asText("Europe PMC-indexed article"),
-                    result.path("pubYear").asText(""));
-            }
-            articles.add(new Article(
-                title,
-                "https://europepmc.org/article/%s/%s".formatted(source, id),
-                shorten(summary, 700),
-                "Europe PMC"
-            ));
-        }
-        return articles;
-    }
-
-    /** General medical reference fallback when no literature matched the query. */
-    private List<Article> searchWikipedia(String query) throws Exception {
-        String url = "https://en.wikipedia.org/w/rest.php/v1/search/page?q=%s&limit=%d"
-            .formatted(URLEncoder.encode(query, StandardCharsets.UTF_8), MAX_ARTICLES_PER_SOURCE);
-        String body = restClient.get().uri(url).retrieve().body(String.class);
-        List<Article> articles = new ArrayList<>();
-        JsonNode pages = objectMapper.readTree(body).path("pages");
-        for (JsonNode page : pages) {
-            String key = page.path("key").asText("");
-            String title = page.path("title").asText("");
-            if (key.isBlank() || title.isBlank()) {
-                continue;
-            }
-            String summary = fetchWikipediaSummary(key);
-            if (!StringUtils.hasText(summary)) {
-                summary = page.path("description").asText("No summary available.");
-            }
-            articles.add(new Article(title, "https://en.wikipedia.org/wiki/" + key, summary, "Wikipedia"));
-        }
-        return articles;
-    }
-
-    private String fetchWikipediaSummary(String pageKey) {
-        try {
-            String body = restClient.get()
-                .uri("https://en.wikipedia.org/api/rest_v1/page/summary/" + pageKey)
-                .retrieve()
-                .body(String.class);
-            return objectMapper.readTree(body).path("extract").asText("");
-        } catch (Exception summaryFailure) {
-            return "";
-        }
-    }
-
-    private String summarize(Intake intake, String suggestedDiagnosis, List<Article> articles) {
+    /** Used only if live web search is unavailable and we have PubMed excerpts to summarize. */
+    private String fallbackSummarize(Intake intake, String suggestedDiagnosis, List<Article> articles) {
         try {
             StringBuilder userInput = new StringBuilder();
             userInput.append("Patient presentation: ").append(intake.getChiefComplaint());
@@ -374,15 +372,15 @@ public class MedicalResearchAgent {
                 userInput.append(" | triage concern: ").append(suggestedDiagnosis);
             }
             userInput.append("\n\nReference article excerpts:\n");
-            articles.forEach(article -> userInput.append("- [").append(article.source()).append("] ")
+            articles.forEach(article -> userInput.append("- [PubMed] ")
                 .append(article.title()).append(": ")
                 .append(shorten(article.summary(), 500)).append("\n"));
-            String summary = springAiChatService.respond(SUMMARY_INSTRUCTION, userInput.toString());
+            String summary = springAiChatService.respond(FALLBACK_SUMMARY_INSTRUCTION, userInput.toString());
             if (StringUtils.hasText(summary)) {
                 return summary.trim();
             }
         } catch (Exception summaryFailure) {
-            log.warn("Research LLM summary failed, using raw article extracts: {}", summaryFailure.getMessage());
+            log.warn("Research LLM fallback summary failed, using raw article extracts: {}", summaryFailure.getMessage());
         }
         return articles.stream()
             .map(article -> "- " + article.title() + ": " + shorten(article.summary(), 300))
@@ -390,20 +388,19 @@ public class MedicalResearchAgent {
             .orElse("No briefing available.");
     }
 
-    private void saveResearch(Patient patient, Intake intake, List<Article> articles, String briefing) {
+    private void saveResearch(Patient patient, Intake intake, List<Citation> citations, String briefing) {
         StringBuilder note = new StringBuilder("Medical research briefing for ")
             .append(intake.getChiefComplaint())
-            .append(" (automated online research):\n\n")
+            .append(" (live agentic web research):\n\n")
             .append(briefing)
             .append("\n\nSources:");
-        articles.forEach(article -> note.append("\n- [").append(article.source()).append("] ")
-            .append(article.title()).append(" (").append(article.url()).append(")"));
+        citations.forEach(citation -> note.append("\n- ").append(citation.title()).append(" (").append(citation.url()).append(")"));
 
         PatientThreadComment comment = new PatientThreadComment(patient, intake, AGENT_NAME, note.toString());
-        articles.forEach(article -> comment.addAttachment(new PatientThreadAttachment(
-            article.title(),
+        citations.forEach(citation -> comment.addAttachment(new PatientThreadAttachment(
+            citation.title(),
             "text/html",
-            article.url()
+            citation.url()
         )));
         threadCommentRepository.save(comment);
 
@@ -413,8 +410,8 @@ public class MedicalResearchAgent {
             null,
             "MEDICAL_RESEARCH",
             "Medical research saved",
-            shorten("%s researched \"%s\", wrote a briefing, and attached %d source links to the patient thread.".formatted(
-                AGENT_NAME, intake.getChiefComplaint(), articles.size()), 990),
+            shorten("%s ran a live web search for \"%s\", wrote a briefing, and attached %d real citations to the patient thread.".formatted(
+                AGENT_NAME, intake.getChiefComplaint(), citations.size()), 990),
             "AGENT"
         ));
     }
@@ -427,6 +424,6 @@ public class MedicalResearchAgent {
         return compact.length() <= maxLength ? compact : compact.substring(0, maxLength - 3) + "...";
     }
 
-    private record Article(String title, String url, String summary, String source) {
+    private record Article(String title, String url, String summary) {
     }
 }
